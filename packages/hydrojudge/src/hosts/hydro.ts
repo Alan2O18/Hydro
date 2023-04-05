@@ -1,14 +1,13 @@
 /* eslint-disable no-await-in-loop */
 import path from 'path';
-import fs from 'fs-extra';
-import { ObjectID } from 'mongodb';
+import { ObjectId } from 'mongodb';
 import PQueue from 'p-queue';
 import superagent from 'superagent';
 import WebSocket from 'ws';
+import { fs } from '@hydrooj/utils';
 import { LangConfig } from '@hydrooj/utils/lib/lang';
 import * as sysinfo from '@hydrooj/utils/lib/sysinfo';
 import type { JudgeResultBody } from 'hydrooj';
-import { processTestdata } from '../cases';
 import { getConfig } from '../config';
 import { FormatError, SystemError } from '../error';
 import log from '../log';
@@ -117,7 +116,6 @@ export default class Hydro {
             queue.start();
             await Promise.all(tasks);
             await fs.writeFile(path.join(filePath, 'etags'), JSON.stringify(version));
-            await processTestdata(filePath);
         }
         await fs.writeFile(path.join(filePath, 'lastUsage'), new Date().getTime().toString());
         return filePath;
@@ -143,8 +141,8 @@ export default class Hydro {
         return null;
     }
 
-    send(rid: string | ObjectID, key: 'next' | 'end', data: Partial<JudgeResultBody>) {
-        data.rid = new ObjectID(rid);
+    send(rid: string | ObjectId, key: 'next' | 'end', data: Partial<JudgeResultBody>) {
+        data.rid = new ObjectId(rid);
         data.key = key;
         if (data.case && typeof data.case.message === 'string') data.case.message = removeNixPath(data.case.message);
         if (typeof data.message === 'string') data.message = removeNixPath(data.message);
@@ -155,13 +153,20 @@ export default class Hydro {
     getNext(t: JudgeTask) {
         return (data: Partial<JudgeResultBody>) => {
             log.debug('Next: %o', data);
-            this.send(t.request.rid, 'next', data);
+            const performanceMode = getConfig('performance') || t.meta.rejudge || t.meta.hackRejudge;
+            if (performanceMode && data.case && !data.compilerText && !data.message) {
+                t.callbackCache ||= [];
+                t.callbackCache.push(data.case);
+            } else {
+                this.send(t.request.rid, 'next', data);
+            }
         };
     }
 
     getEnd(t: JudgeTask) {
         return (data: Partial<JudgeResultBody>) => {
             log.info('End: %o', data);
+            if (t.callbackCache) data.cases = t.callbackCache;
             this.send(t.request.rid, 'end', data);
         };
     }

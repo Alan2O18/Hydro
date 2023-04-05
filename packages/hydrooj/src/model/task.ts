@@ -1,5 +1,6 @@
 import { hostname } from 'os';
-import { FilterQuery, ObjectID } from 'mongodb';
+import cac from 'cac';
+import { Filter, ObjectId } from 'mongodb';
 import { nanoid } from 'nanoid';
 import { sleep } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
@@ -11,8 +12,9 @@ import db from '../service/db';
 const logger = new Logger('model/task');
 const coll = db.collection('task');
 const collEvent = db.collection('event');
+const argv = cac().parse();
 
-async function getFirst(query: FilterQuery<Task>) {
+async function getFirst(query: Filter<Task>) {
     if (process.env.CI) return null;
     const q = { ...query };
     const res = await coll.findOneAndDelete(q, { sort: { priority: -1 } });
@@ -64,7 +66,7 @@ class TaskModel {
         const t: Task = {
             ...task,
             priority: task.priority ?? 0,
-            _id: new ObjectID(),
+            _id: new ObjectId(),
         };
         const res = await coll.insertOne(t);
         return res.insertedId;
@@ -75,19 +77,19 @@ class TaskModel {
         return res.insertedIds;
     }
 
-    static get(_id: ObjectID) {
+    static get(_id: ObjectId) {
         return coll.findOne({ _id });
     }
 
-    static count(query: FilterQuery<Task>) {
-        return coll.find(query).count();
+    static count(query: Filter<Task>) {
+        return coll.countDocuments(query);
     }
 
-    static del(_id: ObjectID) {
+    static del(_id: ObjectId) {
         return coll.deleteOne({ _id });
     }
 
-    static deleteMany(query: FilterQuery<Task>) {
+    static deleteMany(query: Filter<Task>) {
         return coll.deleteMany(query);
     }
 
@@ -112,7 +114,6 @@ export async function apply(ctx: Context) {
     });
 
     if (process.env.NODE_APP_INSTANCE !== '0') return;
-    await collEvent.createIndex({ expire: 1 }, { expireAfterSeconds: 0 });
     const stream = collEvent.watch();
     const handleEvent = async (doc: EventDoc) => {
         const payload = JSON.parse(doc.payload);
@@ -131,13 +132,15 @@ export async function apply(ctx: Context) {
         while (true) {
             // eslint-disable-next-line no-await-in-loop
             const res = await collEvent.findOneAndUpdate(
-                { ack: { $nin: [id] } },
+                { expire: { $gt: new Date() }, ack: { $nin: [id] } },
                 { $push: { ack: id } },
             );
+            if (argv.options.showEvent) logger.info('Event: %o', res.value);
             // eslint-disable-next-line no-await-in-loop
             await (res.value ? handleEvent(res.value) : sleep(500));
         }
     });
+    await db.ensureIndexes(collEvent, { name: 'expire', key: { expire: 1 }, expireAfterSeconds: 0 });
     await db.ensureIndexes(coll, { name: 'task', key: { type: 1, subType: 1, priority: -1 } });
 }
 

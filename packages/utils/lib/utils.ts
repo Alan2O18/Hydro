@@ -5,7 +5,7 @@ import { Duplex } from 'stream';
 import { inspect } from 'util';
 import fs from 'fs-extra';
 import moment, { isMoment, Moment } from 'moment-timezone';
-import { ObjectID } from 'mongodb';
+import { ObjectId } from 'mongodb';
 import Logger from 'reggol';
 export * as yaml from 'js-yaml';
 export * as fs from 'fs-extra';
@@ -63,7 +63,7 @@ String.prototype.format = function formatStr(...args) {
             }
         } else return this.formatFromArray(args);
     }
-    return result;
+    return result.toString();
 };
 
 export function isClass(obj: any, strict = false): obj is new (...args: any) => any {
@@ -128,7 +128,7 @@ export namespace Time {
         else if (isMoment(timestamp)) _timestamp = timestamp.toDate().getTime();
         else _timestamp = timestamp.getTime();
         const hexSeconds = Math.floor(_timestamp / 1000).toString(16);
-        return new ObjectID(`${hexSeconds}${allZero ? '0000000000000000' : new ObjectID().toHexString().substr(8)}`);
+        return new ObjectId(`${hexSeconds}${allZero ? '0000000000000000' : new ObjectId().toHexString().substr(8)}`);
     }
 }
 
@@ -254,31 +254,6 @@ export function CallableInstance(property = '__call__') {
 }
 
 CallableInstance.prototype = Object.create(Function.prototype);
-
-const fSortR = /[^\d]+|\d+/g;
-export function sortFiles(files: { _id: string }[] | string[]) {
-    if (!files?.length) return [];
-    const isString = typeof files[0] === 'string';
-    const result = files
-        .map((i) => (isString ? { name: i, weights: i.match(fSortR) } : { ...i, weights: (i._id || i.name).match(fSortR) }))
-        .sort((a, b) => {
-            let pos = 0;
-            const weightsA = a.weights;
-            const weightsB = b.weights;
-            let weightA = weightsA[pos];
-            let weightB = weightsB[pos];
-            while (weightA && weightB) {
-                const v = weightA - weightB;
-                if (!Number.isNaN(v) && v !== 0) return v;
-                if (weightA !== weightB) return weightA > weightB ? 1 : -1;
-                pos += 1;
-                weightA = weightsA[pos];
-                weightB = weightsB[pos];
-            }
-            return weightA ? 1 : -1;
-        });
-    return isString ? result.map((x) => x.name) : result;
-}
 
 export const htmlEncode = (str: string) => str.replace(/[&<>'"]/g,
     (tag: string) => ({

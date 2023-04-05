@@ -14,18 +14,19 @@ const Root = {
 
 describe('App', () => {
     let agent: supertest.SuperAgentTest;
-    before((done) => {
-        let timeout;
-        const resolve = () => setTimeout(() => {
-            clearTimeout(timeout);
-            agent = supertest.agent(require('hydrooj').httpServer);
-            done();
-        }, 2000);
-        process.send = ((send) => (data) => {
-            if (data === 'ready') resolve();
-            return send?.(data) || false;
-        })(process.send);
-        timeout = setTimeout(resolve, 20000);
+    before(async () => {
+        const init = Date.now();
+        await new Promise((resolve) => {
+            process.send = ((send) => (data) => {
+                console.log('send', data);
+                if (data === 'ready') {
+                    agent = supertest.agent(require('hydrooj').httpServer);
+                    resolve(null);
+                }
+                return send?.(data) || false;
+            })(process.send);
+        });
+        console.log('Application inited in %d ms', Date.now() - init);
     }, { timeout: 30000 });
 
     const routes = ['/', '/api', '/p', '/contest', '/homework', '/user/1', '/training'];

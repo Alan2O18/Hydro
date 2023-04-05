@@ -1,11 +1,12 @@
 /* eslint-disable max-len */
 /* eslint-disable no-await-in-loop */
+import cordis from 'cordis';
 import yaml from 'js-yaml';
 import { Dictionary } from 'lodash';
 import moment from 'moment-timezone';
 import { LangConfig, parseLang } from '@hydrooj/utils/lib/lang';
 import { retry } from '@hydrooj/utils/lib/utils';
-import { Context } from '../context';
+import { Context, Service } from '../context';
 import { Setting as _Setting } from '../interface';
 import { Logger } from '../logger';
 import * as builtin from './builtin';
@@ -43,7 +44,7 @@ export const DOMAIN_SETTINGS_BY_KEY: SettingDict = {};
 export const SYSTEM_SETTINGS_BY_KEY: SettingDict = {};
 
 // eslint-disable-next-line max-len
-export type SettingType = 'text' | 'yaml' | 'number' | 'float' | 'markdown' | 'password' | 'boolean' | 'textarea' | [string, string][] | Record<string, string>;
+export type SettingType = 'text' | 'yaml' | 'number' | 'float' | 'markdown' | 'password' | 'boolean' | 'textarea' | [string, string][] | Record<string, string> | 'json';
 
 export const Setting = (
     family: string, key: string, value: any = null,
@@ -75,6 +76,17 @@ export const PreferenceSetting = (...settings: _Setting[]) => {
         SETTINGS.push(setting);
         SETTINGS_BY_KEY[setting.key] = setting;
     }
+    return () => {
+        for (const setting of settings) {
+            delete SETTINGS_BY_KEY[setting.key];
+            if (PREFERENCE_SETTINGS.includes(setting)) {
+                PREFERENCE_SETTINGS.splice(PREFERENCE_SETTINGS.indexOf(setting), 1);
+            }
+            if (SETTINGS.includes(setting)) {
+                SETTINGS.splice(SETTINGS.indexOf(setting), 1);
+            }
+        }
+    };
 };
 export const AccountSetting = (...settings: _Setting[]) => {
     for (const setting of settings) {
@@ -83,6 +95,17 @@ export const AccountSetting = (...settings: _Setting[]) => {
         SETTINGS.push(setting);
         SETTINGS_BY_KEY[setting.key] = setting;
     }
+    return () => {
+        for (const setting of settings) {
+            delete SETTINGS_BY_KEY[setting.key];
+            if (ACCOUNT_SETTINGS.includes(setting)) {
+                ACCOUNT_SETTINGS.splice(ACCOUNT_SETTINGS.indexOf(setting), 1);
+            }
+            if (SETTINGS.includes(setting)) {
+                SETTINGS.splice(SETTINGS.indexOf(setting), 1);
+            }
+        }
+    };
 };
 export const DomainUserSetting = (...settings: _Setting[]) => {
     for (const setting of settings) {
@@ -90,6 +113,14 @@ export const DomainUserSetting = (...settings: _Setting[]) => {
         DOMAIN_USER_SETTINGS.push(setting);
         DOMAIN_USER_SETTINGS_BY_KEY[setting.key] = setting;
     }
+    return () => {
+        for (const setting of settings) {
+            delete DOMAIN_USER_SETTINGS_BY_KEY[setting.key];
+            if (DOMAIN_USER_SETTINGS.includes(setting)) {
+                DOMAIN_USER_SETTINGS.splice(DOMAIN_USER_SETTINGS.indexOf(setting), 1);
+            }
+        }
+    };
 };
 export const DomainSetting = (...settings: _Setting[]) => {
     for (const setting of settings) {
@@ -97,6 +128,14 @@ export const DomainSetting = (...settings: _Setting[]) => {
         DOMAIN_SETTINGS.push(setting);
         DOMAIN_SETTINGS_BY_KEY[setting.key] = setting;
     }
+    return () => {
+        for (const setting of settings) {
+            delete DOMAIN_SETTINGS_BY_KEY[setting.key];
+            if (DOMAIN_SETTINGS.includes(setting)) {
+                DOMAIN_SETTINGS.splice(DOMAIN_SETTINGS.indexOf(setting), 1);
+            }
+        }
+    };
 };
 export const SystemSetting = (...settings: _Setting[]) => {
     for (const setting of settings) {
@@ -104,6 +143,14 @@ export const SystemSetting = (...settings: _Setting[]) => {
         SYSTEM_SETTINGS.push(setting);
         SYSTEM_SETTINGS_BY_KEY[setting.key] = setting;
     }
+    return () => {
+        for (const setting of settings) {
+            delete SYSTEM_SETTINGS_BY_KEY[setting.key];
+            if (SYSTEM_SETTINGS.includes(setting)) {
+                SYSTEM_SETTINGS.splice(SYSTEM_SETTINGS.indexOf(setting), 1);
+            }
+        }
+    };
 };
 
 const LangSettingNode = {
@@ -153,6 +200,7 @@ AccountSetting(
     Setting('setting_storage', 'unreadMsg', 0, 'number', 'Unread Message Count', null, FLAG_DISABLED | FLAG_HIDDEN),
     Setting('setting_storage', 'badge', '', 'text', 'badge info', null, FLAG_DISABLED | FLAG_HIDDEN),
     Setting('setting_storage', 'banReason', '', 'text', 'ban reason', null, FLAG_DISABLED | FLAG_HIDDEN),
+    Setting('setting_storage', 'pinnedDomains', [], 'json', 'pinned domains', null, FLAG_DISABLED | FLAG_HIDDEN),
 );
 
 DomainSetting(
@@ -170,7 +218,7 @@ DomainUserSetting(
     Setting('setting_storage', 'nSubmit', 0, 'number', 'nSubmit', null, FLAG_HIDDEN | FLAG_DISABLED),
     Setting('setting_storage', 'nLike', 0, 'number', 'nLike', null, FLAG_HIDDEN | FLAG_DISABLED),
     Setting('setting_storage', 'rp', 0, 'number', 'RP', null, FLAG_HIDDEN | FLAG_DISABLED),
-    Setting('setting_storage', 'rpInfo', '', 'text'/* JSON */, 'RP Detail', null, FLAG_HIDDEN | FLAG_DISABLED),
+    Setting('setting_storage', 'rpInfo', {}, 'json', 'RP Detail', null, FLAG_HIDDEN | FLAG_DISABLED),
     Setting('setting_storage', 'rpdelta', 0, 'number', 'RP.delta', null, FLAG_HIDDEN | FLAG_DISABLED),
     Setting('setting_storage', 'rank', 0, 'number', 'Rank', null, FLAG_DISABLED | FLAG_HIDDEN),
     Setting('setting_storage', 'level', 0, 'number', 'level', null, FLAG_HIDDEN | FLAG_DISABLED),
@@ -202,10 +250,11 @@ SystemSetting(
     Setting('setting_server', 'server.port', 8888, 'number', 'server.port', 'Server Port'),
     Setting('setting_server', 'server.xff', null, 'text', 'server.xff', 'IP Header'),
     Setting('setting_server', 'server.xhost', null, 'text', 'server.xhost', 'Hostname Header'),
+    Setting('setting_server', 'server.xproxy', false, 'boolean', 'server.xproxy', 'Use reverse_proxy'),
+    Setting('setting_server', 'server.cors', '', 'text', 'server.cors', 'CORS domains'),
     Setting('setting_server', 'server.language', 'zh_CN', langRange, 'server.language', 'Default display language'),
     Setting('setting_server', 'server.login', true, 'boolean', 'server.login', 'Allow builtin-login', FLAG_PRO),
     Setting('setting_server', 'server.message', true, 'boolean', 'server.message', 'Allow users send messages'),
-    Setting('setting_server', 'server.blog', true, 'boolean', 'server.blog', 'Allow users post blog'),
     Setting('setting_server', 'server.checkUpdate', true, 'boolean', 'server.checkUpdate', 'Daily update check'),
     Setting('setting_server', 'server.ignoreUA', ignoreUA, 'textarea', 'server.ignoreUA', 'ignoredUA'),
     ServerLangSettingNode,
@@ -231,13 +280,12 @@ SystemSetting(
     Setting('setting_basic', 'pagination.training', 10, 'number', 'pagination.training', 'Trainings per page'),
     Setting('setting_basic', 'pagination.reply', 50, 'number', 'pagination.reply', 'Replies per page'),
     Setting('setting_session', 'session.keys', [String.random(32)], 'text', 'session.keys', 'session.keys', FLAG_HIDDEN),
-    Setting('setting_session', 'session.secure', false, 'boolean', 'session.secure', 'session.secure', FLAG_HIDDEN),
+    Setting('setting_session', 'session.domain', '', 'text', 'session.domain', 'session.domain', FLAG_HIDDEN),
     Setting('setting_session', 'session.saved_expire_seconds', 3600 * 24 * 30,
         'number', 'session.saved_expire_seconds', 'Saved session expire seconds'),
     Setting('setting_session', 'session.unsaved_expire_seconds', 3600 * 3,
         'number', 'session.unsaved_expire_seconds', 'Unsaved session expire seconds'),
     Setting('setting_storage', 'db.ver', 0, 'number', 'db.ver', 'Database version', FLAG_DISABLED | FLAG_HIDDEN),
-    Setting('setting_storage', 'system.webmanage', 'disabled', 'text', 'system.webmanage', 'Enable web manage', FLAG_DISABLED | FLAG_HIDDEN),
     Setting('setting_storage', 'installid', String.random(64), 'text', 'installid', 'Installation ID', FLAG_HIDDEN | FLAG_DISABLED),
 );
 
@@ -271,8 +319,34 @@ export async function apply(ctx: Context) {
     });
 }
 
+declare module '../context' {
+    interface Context {
+        setting: SettingService;
+    }
+}
+
+const T = <F extends (...args: any[]) => any>(origFunc: F, disposeFunc?) =>
+    function method(this: cordis.Service, ...args: Parameters<F>) {
+        const res = origFunc(...args);
+        this.caller?.on('dispose', () => (disposeFunc ? disposeFunc(res) : res()));
+    };
+
+export class SettingService extends Service {
+    static readonly methods = ['PreferenceSetting', 'AccountSetting', 'DomainSetting', 'DomainUserSetting', 'SystemSetting'];
+    PreferenceSetting = T(PreferenceSetting);
+    AccountSetting = T(AccountSetting);
+    DomainSetting = T(DomainSetting);
+    DomainUserSetting = T(DomainUserSetting);
+    SystemSetting = T(SystemSetting);
+    constructor(ctx: Context) {
+        super(ctx, 'setting', true);
+    }
+}
+Context.service('setting', SettingService);
+
 global.Hydro.model.setting = {
     apply,
+    SettingService,
     Setting,
     PreferenceSetting,
     AccountSetting,

@@ -8,6 +8,7 @@ import {
 } from 'vj/utils';
 
 export default new AutoloadPage('omnibar', () => {
+  if (document.documentElement.dataset.layout !== 'basic') return;
   const $search = $(`
     <div class='omnibar' data-hotkey="esc:click" style="opacity:0;display:none;">
       <div class='omnibar-main'>
@@ -28,7 +29,7 @@ export default new AutoloadPage('omnibar', () => {
   $(document.body).append($entry);
   const $input = $('.omnibar input') as JQuery<HTMLInputElement>;
 
-  const prefix = window.location.href.startsWith('/d/') ? `/d/${UiContext.domainId}` : '';
+  const prefix = window.location.pathname.startsWith('/d/') ? `/d/${UiContext.domainId}` : '';
   let setSearching;
   let pdocs = [];
   let psdict = {};
@@ -40,17 +41,17 @@ export default new AutoloadPage('omnibar', () => {
       <>
         {searching && <div>Searching...</div>}
         {pdocs.length > 0 && <div className="omnibar-content-title">{i18n('Problems')}</div>}
-        {pdocs.map(({
-          domainId, docId, pid, title, nSubmit, nAccept,
+        {pdocs.map((i) => ({ ...i, base: i.domainId !== UiContext.domainId ? `/d/${i.domainId}` : prefix })).map(({
+          domainId, docId, pid, title, nSubmit, nAccept, base,
         }) => (
           <a
             key={domainId + docId}
             className="omnibar-content-section omnibar-problem"
-            href={`${domainId !== UiContext.domainId ? `/d/${domainId}` : prefix}/p/${pid || docId}`}
+            href={`${base}/p/${pid || docId}`}
           >
             <div>
               <a
-                href={psdict[`${domainId}#${docId}`]?.rid && `/record/${psdict[`${domainId}#${docId}`]?.rid}`}
+                href={psdict[`${domainId}#${docId}`]?.rid && `${base}/record/${psdict[`${domainId}#${docId}`]?.rid}`}
                 className={`record-status--text ${STATUS_CODES[psdict[`${domainId}#${docId}`]?.status]}`}
               >
                 <span className={`icon record-status--icon ${STATUS_CODES[psdict[`${domainId}#${docId}`]?.status]}`}></span>

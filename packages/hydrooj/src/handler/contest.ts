@@ -2,7 +2,7 @@ import AdmZip from 'adm-zip';
 import { statSync } from 'fs-extra';
 import { pick } from 'lodash';
 import moment from 'moment-timezone';
-import { ObjectID } from 'mongodb';
+import { ObjectId } from 'mongodb';
 import {
     Counter, sortFiles, streamToBuffer, Time,
 } from '@hydrooj/utils/lib/utils';
@@ -11,7 +11,7 @@ import {
     ContestScoreboardHiddenError, FileLimitExceededError, FileUploadError,
     InvalidTokenError, NotAssignedError, PermissionError, ValidationError,
 } from '../error';
-import { Tdoc } from '../interface';
+import { ScoreboardConfig, Tdoc } from '../interface';
 import paginate from '../lib/paginate';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -47,8 +47,8 @@ registerResolver(
     'Query', 'contest(id: ObjectID!)', 'Contest',
     async (arg, ctx) => {
         ctx.checkPerm(PERM.PERM_VIEW);
-        arg.id = new ObjectID(arg.id);
-        ctx.tdoc = await contest.get(ctx.args.domainId, new ObjectID(arg.id));
+        arg.id = new ObjectId(arg.id);
+        ctx.tdoc = await contest.get(ctx.args.domainId, new ObjectId(arg.id));
         if (!ctx.tdoc) throw new ContestNotFoundError(ctx.args.domainId, arg.id);
         return ctx.tdoc;
     },
@@ -72,10 +72,13 @@ ScheduleModel.Worker.addHandler('contest', async (doc) => {
 export class ContestListHandler extends Handler {
     @param('rule', Types.Range(contest.RULES), true)
     @param('page', Types.PositiveInt, true)
-    async get(domainId: string, rule = '', page = 1) {
+    @param('all', Types.Boolean)
+    async get(domainId: string, rule = '', page = 1, all = false) {
         if (rule && contest.RULES[rule].hidden) throw new BadRequestError();
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
-        const cursor = contest.getMulti(domainId, rule ? { rule } : { rule: { $in: rules } });
+        if (all && !this.user.hasPerm(PERM.PERM_MOD_BADGE)) all = false;
+        const q = { ...all ? { assign: { $in: [...this.user.group, null] } } : {}, ...rule ? { rule } : { rule: { $in: rules } } };
+        const cursor = contest.getMulti(domainId, q);
         const qs = rule ? `rule=${rule}` : '';
         const [tdocs, tpcount] = await paginate<Tdoc>(cursor, page, system.get('pagination.contest'));
         const tids = [];
@@ -92,8 +95,8 @@ export class ContestDetailBaseHandler extends Handler {
     tdoc?: Tdoc<30>;
     tsdoc?: any;
 
-    @param('tid', Types.ObjectID, true)
-    async __prepare(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId, true)
+    async __prepare(domainId: string, tid: ObjectId) {
         if (!tid) return; // ProblemDetailHandler also extends from ContestDetailBaseHandler
         [this.tdoc, this.tsdoc] = await Promise.all([
             contest.get(domainId, tid),
@@ -110,8 +113,8 @@ export class ContestDetailBaseHandler extends Handler {
         }
     }
 
-    @param('tid', Types.ObjectID, true)
-    async after(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId, true)
+    async after(domainId: string, tid: ObjectId) {
         if (!tid || this.tdoc.rule === 'homework') return;
         if (this.request.json || !this.response.template) return;
         const pdoc = 'pdoc' in this ? (this as any).pdoc : {};
@@ -151,8 +154,8 @@ export class ContestDetailHandler extends Handler {
     tdoc?: Tdoc<30>;
     tsdoc?: any;
 
-    @param('tid', Types.ObjectID)
-    async prepare(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId)
+    async prepare(domainId: string, tid: ObjectId) {
         [this.tdoc, this.tsdoc] = await Promise.all([
             contest.get(domainId, tid),
             contest.getStatus(domainId, tid, this.user._id),
@@ -169,8 +172,8 @@ export class ContestDetailHandler extends Handler {
         }
     }
 
-    @param('tid', Types.ObjectID)
-    async get(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId)
+    async get(domainId: string, tid: ObjectId) {
         this.response.template = 'contest_detail.html';
         const udict = await user.getList(domainId, [this.tdoc.owner]);
         this.response.body = {
@@ -216,9 +219,9 @@ export class ContestDetailHandler extends Handler {
         ];
     }
 
-    @param('tid', Types.ObjectID)
+    @param('tid', Types.ObjectId)
     @param('code', Types.String, true)
-    async postAttend(domainId: string, tid: ObjectID, code = '') {
+    async postAttend(domainId: string, tid: ObjectId, code = '') {
         if (contest.isDone(this.tdoc)) throw new ContestNotLiveError(tid);
         if (this.tdoc._code && code !== this.tdoc._code) throw new InvalidTokenError('Contest Invitation', code);
         await contest.attend(domainId, tid, this.user._id);
@@ -227,8 +230,8 @@ export class ContestDetailHandler extends Handler {
 }
 
 export class ContestProblemListHandler extends ContestDetailBaseHandler {
-    @param('tid', Types.ObjectID)
-    async get(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId)
+    async get(domainId: string, tid: ObjectId) {
         if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(domainId, tid);
         if (!this.tsdoc?.attend && !contest.isDone(this.tdoc)) throw new ContestNotAttendedError(domainId, tid);
         const [pdict, udict] = await Promise.all([
@@ -260,16 +263,23 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
 }
 
 export class ContestScoreboardHandler extends ContestDetailBaseHandler {
-    @param('tid', Types.ObjectID)
+    @param('tid', Types.ObjectId)
     @param('ext', Types.Range(['csv', 'html', 'ghost']), true)
-    async get(domainId: string, tid: ObjectID, ext = '') {
+    @param('realtime', Types.Boolean)
+    async get(domainId: string, tid: ObjectId, ext = '', realtime) {
         if (!contest.canShowScoreboard.call(this, this.tdoc, true)) throw new ContestScoreboardHiddenError(tid);
+        if (realtime && !this.user.own(this.tdoc)) {
+            this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+        }
         if (ext) {
             await this.exportScoreboard(domainId, tid, ext);
             return;
         }
-        const [, rows, udict, pdict] = await contest.getScoreboard.call(this, domainId, tid, false);
-        this.response.template = 'contest_scoreboard.html';
+        const config: ScoreboardConfig = { isExport: false };
+        if (!realtime && this.tdoc.lockAt && !this.tdoc.unlocked) {
+            config.lockAt = this.tdoc.lockAt;
+        }
+        const [, rows, udict, pdict] = await contest.getScoreboard.call(this, domainId, tid, config);
         // eslint-disable-next-line @typescript-eslint/naming-convention
         const page_name = this.tdoc.rule === 'homework'
             ? 'homework_scoreboard'
@@ -277,18 +287,20 @@ export class ContestScoreboardHandler extends ContestDetailBaseHandler {
         this.response.body = {
             tdoc: this.tdoc, rows, udict, pdict, page_name,
         };
+        this.response.pjax = 'partials/scoreboard.html';
+        this.response.template = 'contest_scoreboard.html';
     }
 
-    async exportGhost(domainId: string, tid: ObjectID) {
+    async exportGhost(domainId: string, tid: ObjectId) {
         const tdoc = this.tdoc;
         const [pdict, teams] = await Promise.all([
-            problem.getList(domainId, tdoc.pids, true, false, undefined, true),
+            problem.getList(domainId, tdoc.pids, true, false, problem.PROJECTION_LIST, true),
             contest.getMultiStatus(domainId, { docId: tid }).toArray(),
         ]);
         const udict = await user.getList(domainId, teams.map((i) => i.uid));
         const teamIds: Record<number, number> = {};
         for (let i = 1; i <= teams.length; i++) teamIds[teams[i - 1].uid] = i;
-        const time = (t: ObjectID) => Math.floor((t.getTimestamp().getTime() - tdoc.beginAt.getTime()) / Time.second);
+        const time = (t: ObjectId) => Math.floor((t.getTimestamp().getTime() - tdoc.beginAt.getTime()) / Time.second);
         const pid = (i: number) => String.fromCharCode(65 + i);
         const escape = (i: string) => i.replace(/[",]/g, '');
         const unknownSchool = this.translate('Unknown School');
@@ -309,16 +321,19 @@ export class ContestScoreboardHandler extends ContestDetailBaseHandler {
             `@teams ${tdoc.attend}`,
             `@submissions ${submissions.length}`,
         ].concat(
-            tdoc.pids.map((i, idx) => `@p ${pid(idx)},${escape(pdict[i].title)},20,0`),
+            tdoc.pids.map((i, idx) => `@p ${pid(idx)},${escape(pdict[i]?.title || 'Unknown Problem')},20,0`),
             teams.map((i, idx) => `@t ${idx + 1},0,1,${escape(udict[i.uid].school || unknownSchool)}-${escape(udict[i.uid].uname)}`),
             submissions,
         );
         this.binary(res.join('\n'), `${this.tdoc.title}.ghost`);
     }
 
-    async exportScoreboard(domainId: string, tid: ObjectID, ext: string) {
+    async exportScoreboard(domainId: string, tid: ObjectId, ext: string) {
         await this.limitRate('scoreboard_download', 60, 3);
         if (ext === 'ghost') {
+            if (contest.isLocked(this.tdoc) && !this.user.own(this.tdoc)) {
+                this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+            }
             await this.exportGhost(domainId, tid);
             return;
         }
@@ -326,12 +341,12 @@ export class ContestScoreboardHandler extends ContestDetailBaseHandler {
             csv: async (rows) => `\uFEFF${rows.map((c) => (c.map((i) => i.value?.toString().replace(/\n/g, ' ')).join(','))).join('\n')}`,
             html: (rows, tdoc) => this.renderHTML('contest_scoreboard_download_html.html', { rows, tdoc }),
         };
-        const [, rows] = await contest.getScoreboard.call(this, domainId, tid, true);
+        const [, rows] = await contest.getScoreboard.call(this, domainId, tid, { isExport: true, lockAt: this.tdoc.lockAt });
         this.binary(await getContent[ext](rows, this.tdoc), `${this.tdoc.title}.${ext}`);
     }
 
-    @param('tid', Types.ObjectID)
-    async postUnlock(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId)
+    async postUnlock(domainId: string, tid: ObjectId) {
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
         if (!contest.isDone(this.tdoc)) throw new ContestNotEndedError(domainId, tid);
         await contest.unlockScoreboard(domainId, tid);
@@ -342,8 +357,8 @@ export class ContestScoreboardHandler extends ContestDetailBaseHandler {
 export class ContestEditHandler extends Handler {
     tdoc: Tdoc;
 
-    @param('tid', Types.ObjectID, true)
-    async prepare(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId, true)
+    async prepare(domainId: string, tid: ObjectId) {
         if (tid) {
             this.tdoc = await contest.get(domainId, tid);
             if (!this.tdoc) throw new ContestNotFoundError(domainId, tid);
@@ -353,8 +368,8 @@ export class ContestEditHandler extends Handler {
         } else this.checkPerm(PERM.PERM_CREATE_CONTEST);
     }
 
-    @param('tid', Types.ObjectID, true)
-    async get(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId, true)
+    async get(domainId: string, tid: ObjectId) {
         this.response.template = 'contest_edit.html';
         const rules = {};
         for (const i in contest.RULES) {
@@ -375,7 +390,7 @@ export class ContestEditHandler extends Handler {
         };
     }
 
-    @param('tid', Types.ObjectID, true)
+    @param('tid', Types.ObjectId, true)
     @param('beginAtDate', Types.Date)
     @param('beginAtTime', Types.Time)
     @param('duration', Types.Float)
@@ -385,17 +400,17 @@ export class ContestEditHandler extends Handler {
     @param('pids', Types.Content)
     @param('rated', Types.Boolean)
     @param('code', Types.String, true)
-    @param('autoHide', Types.Boolean, true)
+    @param('autoHide', Types.Boolean)
     @param('assign', Types.CommaSeperatedArray, true)
     @param('lock', Types.UnsignedInt, true)
     @param('contestDuration', Types.Float, true)
     @param('maintainer', Types.NumericArray, true)
-    @param('allowViewCode', Types.Boolean, true)
+    @param('allowViewCode', Types.Boolean)
     async postUpdate(
-        domainId: string, tid: ObjectID, beginAtDate: string, beginAtTime: string, duration: number,
+        domainId: string, tid: ObjectId, beginAtDate: string, beginAtTime: string, duration: number,
         title: string, content: string, rule: string, _pids: string, rated = false,
         _code = '', autoHide = false, assign: string[] = null, lock: number = null,
-        contestDuration: number = null, maintainer: number[] = null, allowViewCode = true,
+        contestDuration: number = null, maintainer: number[] = [], allowViewCode = false,
     ) {
         if (autoHide) this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         const pids = _pids.replace(/，/g, ',').split(',').map((i) => +i).filter((i) => i);
@@ -442,8 +457,8 @@ export class ContestEditHandler extends Handler {
         this.response.redirect = this.url('contest_detail', { tid });
     }
 
-    @param('tid', Types.ObjectID)
-    async postDelete(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId)
+    async postDelete(domainId: string, tid: ObjectId) {
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
         await contest.del(domainId, tid);
         await record.updateMulti(domainId, { domainId, contest: tid }, undefined, undefined, { contest: '' });
@@ -461,9 +476,9 @@ export class ContestManagementBaseHandler extends ContestDetailBaseHandler {
 }
 
 export class ContestCodeHandler extends Handler {
-    @param('tid', Types.ObjectID)
+    @param('tid', Types.ObjectId)
     @param('all', Types.Boolean)
-    async get(domainId: string, tid: ObjectID, all: boolean) {
+    async get(domainId: string, tid: ObjectId, all: boolean) {
         await this.limitRate('contest_code', 60, 10);
         const [tdoc, tsdocs] = await contest.getAndListStatus(domainId, tid);
         if (!this.user.own(tdoc) && !this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE)) {
@@ -490,7 +505,7 @@ export class ContestCodeHandler extends Handler {
         }
         const zip = new AdmZip();
         const rdocs = await record.getMulti(domainId, {
-            _id: { $in: Array.from(Object.keys(rnames)).map((id) => new ObjectID(id)) },
+            _id: { $in: Array.from(Object.keys(rnames)).map((id) => new ObjectId(id)) },
         }).toArray();
         await Promise.all(rdocs.map(async (rdoc) => {
             if (rdoc.files?.code) {
@@ -509,8 +524,8 @@ export class ContestCodeHandler extends Handler {
 }
 
 export class ContestManagementHandler extends ContestManagementBaseHandler {
-    @param('tid', Types.ObjectID)
-    async get(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId)
+    async get(domainId: string, tid: ObjectId) {
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdoc,
@@ -523,9 +538,9 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
         this.response.template = 'contest_manage.html';
     }
 
-    @param('tid', Types.ObjectID)
+    @param('tid', Types.ObjectId)
     @param('content', Types.Content)
-    async postBroadcast(domainId: string, tid: ObjectID, content: string) {
+    async postBroadcast(domainId: string, tid: ObjectId, content: string) {
         const tsdocs = await contest.getMultiStatus(domainId, { docId: tid }).toArray();
         const uids = Array.from<number>(new Set(tsdocs.map((tsdoc) => tsdoc.uid)));
         const flag = contest.isOngoing(this.tdoc) ? message.FLAG_ALERT : message.FLAG_UNREAD;
@@ -533,9 +548,9 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
         this.back();
     }
 
-    @param('tid', Types.ObjectID)
-    @post('filename', Types.Name, true)
-    async postUploadFile(domainId: string, tid: ObjectID, filename: string) {
+    @param('tid', Types.ObjectId)
+    @post('filename', Types.Filename, true)
+    async postUploadFile(domainId: string, tid: ObjectId, filename: string) {
         if ((this.tdoc.files?.length || 0) >= system.get('limit.contest_files')) {
             throw new FileLimitExceededError('count');
         }
@@ -556,9 +571,9 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
         this.back();
     }
 
-    @param('tid', Types.ObjectID)
-    @post('files', Types.ArrayOf(Types.Name))
-    async postDeleteFiles(domainId: string, tid: ObjectID, files: string[]) {
+    @param('tid', Types.ObjectId)
+    @post('files', Types.ArrayOf(Types.Filename))
+    async postDeleteFiles(domainId: string, tid: ObjectId, files: string[]) {
         await Promise.all([
             storage.del(files.map((t) => `contest/${domainId}/${tid}/${t}`), this.user._id),
             contest.edit(domainId, tid, { files: this.tdoc.files.filter((i) => !files.includes(i.name)) }),
@@ -568,10 +583,10 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
 }
 
 export class ContestFileDownloadHandler extends ContestDetailBaseHandler {
-    @param('tid', Types.ObjectID)
-    @param('filename', Types.Name)
+    @param('tid', Types.ObjectId)
+    @param('filename', Types.Filename)
     @param('noDisposition', Types.Boolean)
-    async get(domainId: string, tid: ObjectID, filename: string, noDisposition = false) {
+    async get(domainId: string, tid: ObjectId, filename: string, noDisposition = false) {
         this.response.addHeader('Cache-Control', 'public');
         const target = `contest/${domainId}/${tid}/${filename}`;
         const file = await storage.getMeta(target);
@@ -586,8 +601,8 @@ export class ContestFileDownloadHandler extends ContestDetailBaseHandler {
 }
 
 export class ContestUserHandler extends ContestManagementBaseHandler {
-    @param('tid', Types.ObjectID)
-    async get(domainId: string, tid: ObjectID) {
+    @param('tid', Types.ObjectId)
+    async get(domainId: string, tid: ObjectId) {
         const tsdocs = await contest.getMultiStatus(domainId, { docId: tid }).toArray();
         tsdocs.forEach((i) => {
             i.endAt = this.tdoc.duration ? moment(this.tsdoc.startAt).add(this.tdoc.duration, 'hours').toDate() : null;
@@ -598,17 +613,17 @@ export class ContestUserHandler extends ContestManagementBaseHandler {
         this.response.template = 'contest_user.html';
     }
 
-    @param('tid', Types.ObjectID)
+    @param('tid', Types.ObjectId)
     @param('uids', Types.NumericArray)
     @param('unrank', Types.Boolean)
-    async postAddUser(domainId: string, tid: ObjectID, uids: number[], unrank = false) {
+    async postAddUser(domainId: string, tid: ObjectId, uids: number[], unrank = false) {
         await Promise.all(uids.map((uid) => contest.attend(domainId, tid, uid, { unrank })));
         this.back();
     }
 
-    @param('tid', Types.ObjectID)
+    @param('tid', Types.ObjectId)
     @param('uid', Types.PositiveInt)
-    async postRank(domainId: string, tid: ObjectID, uid: number) {
+    async postRank(domainId: string, tid: ObjectId, uid: number) {
         const tsdoc = await contest.getStatus(domainId, tid, uid);
         if (!tsdoc) throw new ContestNotAttendedError(uid);
         await contest.setStatus(domainId, tid, uid, { unrank: !tsdoc.unrank });

@@ -1,8 +1,8 @@
-import fs from 'fs-extra';
+import { fs } from '@hydrooj/utils';
 import { LangConfig } from '@hydrooj/utils/lib/lang';
 import { STATUS } from '@hydrooj/utils/lib/status';
 import type {
-    FileInfo, JudgeMeta, JudgeRequest, JudgeResultBody,
+    FileInfo, JudgeMeta, JudgeRequest, JudgeResultBody, TestCase,
 } from 'hydrooj';
 import readCases from './cases';
 import { getConfig } from './config';
@@ -31,7 +31,7 @@ export class JudgeTask {
     lang: string;
     code: CopyInFile;
     input?: string;
-    clean: (() => Promise<any>)[];
+    clean: (() => Promise<any>)[] = [];
     data: FileInfo[];
     folder: string;
     config: ParsedConfig;
@@ -40,6 +40,7 @@ export class JudgeTask {
     next: (data: Partial<JudgeResultBody>) => void;
     end: (data: Partial<JudgeResultBody>) => void;
     env: Record<string, string>;
+    callbackCache?: TestCase[];
 
     constructor(public session: Session, public request: JudgeRequest) {
         this.stat = {};
@@ -65,12 +66,11 @@ export class JudgeTask {
                 HYDRO_DOMAIN: this.request.domainId.toString(),
                 HYDRO_RECORD: this.rid,
                 HYDRO_LANG: this.lang,
-                HYDRO_USER: this.request.uid.toString(),
+                HYDRO_USER: (this.request.uid || 0).toString(),
                 HYDRO_CONTEST: tid,
             };
             this.next = this.session.getNext(this);
             this.end = this.session.getEnd(this);
-            this.clean = [];
             logger.info('Submission: %s/%s/%s', host, this.source, this.rid);
             await this.doSubmission();
         } catch (e) {
@@ -117,6 +117,8 @@ export class JudgeTask {
                 next: this.next,
                 isSelfSubmission: this.meta.problemOwner === this.request.uid,
                 key: md5(`${this.source}/${getConfig('secret')}`),
+                lang: this.lang,
+                langConfig: this.request.config.type === 'objective' ? null : this.session.getLang(this.lang),
             },
         );
         this.stat.judge = new Date();

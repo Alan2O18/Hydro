@@ -1,16 +1,9 @@
-import { ObjectID } from 'mongodb';
+import { ObjectId } from 'mongodb';
 import avatar from '../../lib/avatar';
+import serializer from '../../lib/serializer';
 import { PERM } from '../../model/builtin';
 import * as system from '../../model/system';
-import { User } from '../../model/user';
 import type { KoaContext } from '../server';
-
-const serializer = (showDisplayName = false) => (k: string, v: any) => {
-    if (k.startsWith('_') && k !== '_id') return undefined;
-    if (typeof v === 'bigint') return `BigInt::${v.toString()}`;
-    if (v instanceof User && !showDisplayName) delete v.displayName;
-    return v;
-};
 
 export default (router, logger) => async (ctx: KoaContext, next) => {
     const { request, response } = ctx.HydroContext;
@@ -22,7 +15,9 @@ export default (router, logger) => async (ctx: KoaContext, next) => {
             viewLang: ctx.translate('__id'),
         };
         const engine = global.Hydro.lib.template?.render
-            || (() => JSON.stringify(args, serializer(user?.hasPerm(PERM.PREM_VIEW_DISPLAYNAME))));
+            || (() => JSON.stringify(args, serializer({
+                showDisplayName: user?.hasPerm(PERM.PREM_VIEW_DISPLAYNAME),
+            })));
         return engine(templateName, {
             handler: ctx.handler,
             UserContext,
@@ -42,11 +37,11 @@ export default (router, logger) => async (ctx: KoaContext, next) => {
         const query: any = {};
         for (const kwargs of kwargsList) {
             for (const key in kwargs) {
-                if (kwargs[key] instanceof ObjectID) args[key] = kwargs[key].toHexString();
+                if (kwargs[key] instanceof ObjectId) args[key] = kwargs[key].toHexString();
                 else args[key] = kwargs[key].toString().replace(/\//g, '%2F');
             }
             for (const key in kwargs.query || {}) {
-                if (query[key] instanceof ObjectID) query[key] = kwargs.query[key].toHexString();
+                if (query[key] instanceof ObjectId) query[key] = kwargs.query[key].toHexString();
                 else query[key] = kwargs.query[key].toString();
             }
         }

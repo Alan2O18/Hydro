@@ -1,4 +1,4 @@
-import { FilterQuery } from 'mongodb';
+import { Filter } from 'mongodb';
 import { TokenDoc } from '../interface';
 import * as bus from '../service/bus';
 import db from '../service/db';
@@ -13,6 +13,7 @@ class TokenModel {
     static TYPE_LOSTPASS = 5;
     static TYPE_EXPORT = 6;
     static TYPE_IMPORT = 7;
+    static TYPE_WEBAUTHN = 8;
     static TYPE_TEXTS = {
         [TokenModel.TYPE_SESSION]: 'Session',
         [TokenModel.TYPE_REGISTRATION]: 'Registration',
@@ -21,21 +22,23 @@ class TokenModel {
         [TokenModel.TYPE_LOSTPASS]: 'Lost Password',
         [TokenModel.TYPE_EXPORT]: 'Export',
         [TokenModel.TYPE_IMPORT]: 'Import',
+        [TokenModel.TYPE_WEBAUTHN]: 'WebAuthn',
     };
 
     static async add(
         tokenType: number, expireSeconds: number, data: any, id = String.random(32),
     ): Promise<[string, TokenDoc]> {
         const now = new Date();
-        const res = await TokenModel.coll.insertOne({
+        const payload = {
             ...data,
             _id: id,
             tokenType,
             createAt: now,
             updateAt: now,
             expireAt: new Date(now.getTime() + expireSeconds * 1000),
-        });
-        return [id, res.ops[0]];
+        };
+        await TokenModel.coll.insertOne(payload);
+        return [id, payload];
     }
 
     @ArgMethod
@@ -43,7 +46,7 @@ class TokenModel {
         return await TokenModel.coll.findOne({ _id: tokenId, tokenType });
     }
 
-    static getMulti(tokenType: number, query: FilterQuery<TokenDoc> = {}) {
+    static getMulti(tokenType: number, query: Filter<TokenDoc> = {}) {
         return TokenModel.coll.find({ tokenType, ...query });
     }
 

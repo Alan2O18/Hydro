@@ -2,22 +2,17 @@ import type * as monaco from 'monaco-editor';
 import React from 'react';
 import { connect } from 'react-redux';
 import { load } from 'vj/components/monaco/loader';
+import { ctx } from 'vj/context';
 
 interface ScratchpadOptions {
   value?: string;
   language?: string;
   handleUpdateCode?: (str: string, event: monaco.editor.IModelContentChangedEvent) => void;
-  mainSize?: number;
-  recordSize?: number;
-  pretestSize?: number;
 }
 
 export default connect((state: any) => ({
   value: state.editor.code,
   language: window.LANGS[state.editor.lang]?.monaco,
-  mainSize: state.ui.main.size,
-  pretestSize: state.ui.pretest.size,
-  recordSize: state.ui.records.size,
 }), (dispatch) => ({
   handleUpdateCode: (code: string) => {
     dispatch({
@@ -59,13 +54,13 @@ export default connect((state: any) => ({
       );
       (window as any).editor = this.editor;
       (window as any).monaco = monaco;
-      window.Hydro.bus.emit('scratchpadEditorCreate', this.editor, monaco);
+      ctx.scratchpad.init(this.editor, monaco);
     }
   }
 
   async componentDidUpdate(prevProps) {
     const {
-      value, language, mainSize, recordSize, pretestSize,
+      value, language,
     } = this.props;
     const { monaco } = await load([language]);
     const { editor, model } = this;
@@ -92,11 +87,6 @@ export default connect((state: any) => ({
       const uri = monaco.Uri.parse(`hydro://${UiContext.pdoc.pid || UiContext.pdoc.docId}.${language}`);
       this.model = monaco.editor.getModel(uri) || monaco.editor.createModel(val, language, uri);
       editor.setModel(this.model);
-    }
-    if (editor) {
-      if (prevProps.mainSize !== mainSize
-        || prevProps.recordSize !== recordSize
-        || prevProps.pretestSize !== pretestSize) editor.layout();
     }
   }
 

@@ -87,7 +87,7 @@
             columns:12,
             label:'Contest Maintainer',
             name:'maintainer',
-            help_text:_('Allow to maintain this contest'),
+            help_text:_('Allow to maintain this {0}').format(_('contest')),
             value:tdoc.maintainer|default('')
           }) }}
           <div class="row">
@@ -158,14 +158,14 @@
               value:tdoc.allowViewCode|default(true),
               row:false
             }) }}
-            <div style="display: none" class="contest-rule-settings contest-rule--acm">
+            <div style="display: none" class="contest-rule-settings contest-rule--acm contest-rule--ioi contest-rule--strictioi">
             {{ form.form_text({
               columns:4,
               label:'Lock (minutes)',
               name:'lock',
               placeholder:_('(leave blank if none)'),
               value:(((tdoc.endAt - tdoc.lockAt)/60000)|int) if tdoc.lockAt else '',
-              help_text:_('Lock scoreboard on last N minutes'),
+              help_text:_('Freeze scoreboard with N minutes remaining'),
               disabled:true,
               row:false
             }) }}

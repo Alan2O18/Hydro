@@ -12,7 +12,6 @@ export * as SystemModel from './model/system';
 export * as TrainingModel from './model/training';
 export * as OpcountModel from './model/opcount';
 export * as OplogModel from './model/oplog';
-export * as BlogModel from './model/blog';
 export * as SettingModel from './model/setting';
 export * as DiscussionModel from './model/discussion';
 export * as DocumentModel from './model/document';
@@ -38,10 +37,11 @@ export { Collections } from './service/db';
 // export { Collections } from './interface';
 export { Service, Context } from './context';
 export { buildContent } from './lib/content';
-export * as validator from './lib/validator';
+export { default as rating } from './lib/rating';
 export { default as avatar } from './lib/avatar';
 export { default as rank } from './lib/rank';
 export { default as paginate } from './lib/paginate';
+export * from './lib/validator';
 export * from './service/decorators';
 export {
     Handler, ConnectionHandler, captureAllRoutes,

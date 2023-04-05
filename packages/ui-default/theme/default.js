@@ -1,10 +1,12 @@
 import 'normalize.css/normalize.css';
 import 'vditor/dist/index.css';
+import 'allotment/dist/style.css';
 import 'pickadate/lib/themes/classic.css';
 import 'pickadate/lib/themes/classic.date.css';
 import 'pickadate/lib/themes/classic.time.css';
 import 'katex/dist/katex.min.css';
 import '@blueprintjs/core/lib/css/blueprint.css';
+import '@blueprintjs/popover2/lib/css/blueprint-popover2.css';
 import '@fontsource/fira-code';
 import '@fontsource/source-code-pro';
 import '@fontsource/roboto-mono';
@@ -25,11 +27,10 @@ import 'vj/misc/section.styl';
 import 'vj/misc/nothing.styl';
 import 'vj/components/editor/cmeditor.styl';
 import 'vj/components/datepicker/datepicker.styl';
+import './dark.styl';
 
 // load all page stylesheets
 const pageStyleReq = require.context('../', true, /\.page\.styl$/i);
 pageStyleReq.keys().map((key) => pageStyleReq(key));
 const pageStyleReqDefault = require.context('../', true, /\.page\.default\.styl$/i);
 pageStyleReqDefault.keys().map((key) => pageStyleReqDefault(key));
-
-import './dark.styl';

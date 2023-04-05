@@ -1,5 +1,8 @@
 import $ from 'jquery';
 import _ from 'lodash';
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import DOMServer from 'react-dom/server';
 
 export function substitute(str: string, obj: any) {
   return str.replace(/\{([^{}]+)\}/g, (match, key) => {
@@ -17,9 +20,31 @@ export function delay(ms) {
   return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
+const defaultDict = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890';
+
+export function secureRandomString(digit = 32, dict = defaultDict) {
+  let result = '';
+  const crypto = window.crypto || (window as any).msCrypto;
+  if (!crypto?.getRandomValues) throw new Error('crypto.getRandomValues not supported');
+  const array = new Uint32Array(digit);
+  crypto.getRandomValues(array);
+  for (let i = 0; i < digit; i++) result += dict[array[i] % dict.length];
+  return result;
+}
+
 type Substitution = string | number | { templateRaw: true, html: string };
 
-export function tpl(pieces: TemplateStringsArray, ...substitutions: Substitution[]) {
+export function tpl(node: React.ReactNode, reactive?: boolean);
+export function tpl(pieces: TemplateStringsArray, ...substitutions: Substitution[]);
+export function tpl(pieces: TemplateStringsArray | React.ReactNode, ...substitutions: Substitution[] | boolean[]) {
+  if (React.isValidElement(pieces)) {
+    if (substitutions[0]) {
+      const div = document.createElement('div');
+      ReactDOM.createRoot(div).render(pieces);
+      return div;
+    }
+    return DOMServer.renderToStaticMarkup(pieces);
+  }
   let result = pieces[0];
   for (let i = 0; i < substitutions.length; ++i) {
     const subst = substitutions[i];
@@ -146,6 +171,7 @@ Object.assign(window.Hydro.utils, {
   i18n,
   rawHtml,
   substitute,
+  secureRandomString,
   request,
   tpl,
   delay,

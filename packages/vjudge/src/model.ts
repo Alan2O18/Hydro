@@ -2,10 +2,9 @@
 import os from 'os';
 import {
     Context, db, DomainModel, JudgeHandler, Logger,
-    ProblemModel, RecordModel, Service, sleep, STATUS, TaskModel, Time,
+    ProblemModel, RecordModel, Service, SettingModel, sleep, STATUS, TaskModel, Time,
 } from 'hydrooj';
 import { BasicProvider, IBasicProvider, RemoteAccount } from './interface';
-import { getDifficulty } from './providers/codeforces';
 import providers from './providers/index';
 
 const coll = db.collection('vjudge');
@@ -40,12 +39,21 @@ class AccountService {
         const end = (payload) => JudgeHandler.end({ ...payload, rid: task.rid });
         await next({ status: STATUS.STATUS_FETCHED });
         try {
+            const comment = SettingModel.langs[task.lang].comment;
+            if (comment) {
+                const msg = `Hydro submission #${task.rid}@${new Date().getTime()}`;
+                if (typeof comment === 'string') task.code = `${comment} ${msg}\n${task.code}`;
+                else if (comment instanceof Array) task.code = `${comment[0]} ${msg} ${comment[1]}\n${task.code}`;
+            }
             const rid = await this.api.submitProblem(task.target, task.lang, task.code, task, next, end);
             if (!rid) return;
             await next({ status: STATUS.STATUS_JUDGING, message: `ID = ${rid}` });
             await this.api.waitForSubmission(rid, next, end);
         } catch (e) {
-            if (process.env.DEV) logger.error(e);
+            if (process.env.DEV) {
+                logger.error(e);
+                if (e.response) console.error(e.response);
+            }
             end({ status: STATUS.STATUS_SYSTEM_ERROR, message: e.message });
         }
     }
@@ -101,8 +109,8 @@ class AccountService {
         const res = await this.login();
         if (!res) return;
         setInterval(() => this.login(), Time.hour);
-        TaskModel.consume({ type: 'remotejudge', subType: this.account.type }, this.judge.bind(this), false);
-        const ddocs = await DomainModel.getMulti({ mount: this.account.type }).toArray();
+        TaskModel.consume({ type: 'remotejudge', subType: this.account.type.split('.')[0] }, this.judge.bind(this), false);
+        const ddocs = await DomainModel.getMulti({ mount: this.account.type.split('.')[0] }).toArray();
         do {
             this.listUpdated = false;
             for (const listName of this.problemLists) {
@@ -123,21 +131,8 @@ class AccountService {
 }
 
 declare module 'hydrooj' {
-    interface Model {
-        vjudge: VJudgeModel;
-    }
     interface Context {
         vjudge: VJudgeService;
-    }
-}
-
-class VJudgeModel {
-    static async fixCodeforcesDifficulty(domainId = 'codeforces') {
-        const pdocs = await ProblemModel.getMulti(domainId, {}).toArray();
-        for (const pdoc of pdocs) {
-            await ProblemModel.edit(domainId, pdoc.docId, { difficulty: getDifficulty(pdoc.tag) });
-        }
-        return true;
     }
 }
 
@@ -153,8 +148,9 @@ class VJudgeService extends Service {
         this.accounts = await coll.find().toArray();
     }
 
-    addProvider(type: string, provider: BasicProvider) {
-        if (this.providers[type]) throw new Error(`duplicate provider ${type}`);
+    addProvider(type: string, provider: BasicProvider, override = false) {
+        if (process.env.VJUDGE_DEBUG && process.env.VJUDGE_DEBUG !== type) return;
+        if (!override && this.providers[type]) throw new Error(`duplicate provider ${type}`);
         this.providers[type] = provider;
         for (const account of this.accounts.filter((a) => a.type === type)) {
             if (account.enableOn && !account.enableOn.includes(os.hostname())) continue;
@@ -166,7 +162,9 @@ class VJudgeService extends Service {
     }
 }
 
-global.Hydro.model.vjudge = VJudgeModel;
+export { BasicFetcher } from './fetch';
+export { VERDICT } from './verdict';
+export * from './interface';
 
 Context.service('vjudge', VJudgeService);
 export const name = 'vjudge';
@@ -175,8 +173,10 @@ export async function apply(ctx: Context) {
     if (process.env.HYDRO_CLI) return;
     const vjudge = new VJudgeService(ctx);
     await vjudge.start();
+    // ctx.on('app/started', () => {
     for (const [k, v] of Object.entries(providers)) {
         vjudge.addProvider(k, v);
     }
+    // });
     ctx.vjudge = vjudge;
 }

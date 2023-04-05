@@ -32,13 +32,96 @@ bug 和功能建议请在 Issues 提出。
 
 ## 联系我们
 
-QQ [3402182471](https://wpa.qq.com/msgrd?v=3&uin=3402182471&site=qq&menu=yes)  
 Hydro 用户群：1085853538  
 Telegram 群 [@hydrodev](https://t.me/hydrodev)
 Telegram [@webpack_exports_undefined](https://t.me/webpack_exports_undefined)  
 
 <details>
 <summary><h2>更新日志（点击展开）</h2></summary>
+
+### Hydro 4.9.0 / UI 4.48.0
+- core: 优化讨论鉴权
+- judge: 优化统一回调评测状态回显
+- judge: 移除 `processTestdata` 步骤
+- judge: 客观题子任务分数回显
+- core: 压平测试数据结构
+- core: rp: 修复比赛分数
+- core&ui: 首次使用 OAuth 时要求设置密码
+- ui: 评测设置 UI 升级
+- install: 根据系统内存调整 wtCacheSize
+- ui: 加载速度优化
+- core: 检测域 ID 大小写
+- ui: 导航栏域索引
+- ui: 支持按权限组过滤作业/比赛
+- judge: 将 Javascript 默认解释器设置为 node
+- judge: 修复删除未评测完成的题目导致评测队列卡死的问题
+
+### Hydro 4.8.0 / UI 4.47.6
+- core: 升级至 mongodb@5
+- ui: 评测详情中显示子任务得分
+- core: 修复测试数据文件名以空格开头导致操作异常的问题
+- dev: 升级 devcontainer 环境
+- ui: 优化 IDE 页面布局
+- ui: 使用 cordis 进行生命周期管理（移除旧 bus）
+- blog: 移动功能到独立的 `@hydrooj/blog` 插件
+- core: 支持动态设置
+- judge: 性能模式（关闭单点回调）
+- ui: 支持为作业设置维护者
+- core: 放行提交答案题至提交语言白名单
+- import-qduoj: 修复空标签导致无法导入的问题
+- ui: 精简 serviceworker 逻辑
+- ui: 修复训练计划加入失败的问题
+- core: 简化 user 返回字段列表
+- core&ui: contest.rule.ioi.strict
+- 其他漏洞修复和体验优化
+
+### Hydro 4.7.3 / UI 4.47.3
+- core: 修复无输入自测
+- core: 修复 endpointForUser 域名不一致导致的 token 无效问题
+- core: 移除 isBinaryFile 检查
+- core: 修复 allowViewCode 设置
+- core: cli: 优先使用 mongosh
+- workspace: 提供 `@hydrooj/eslint-config` 包
+- 其他漏洞修复和体验优化
+
+### Hydro 4.7.2 / UI 4.47.2
+- core: 修复提交答案题
+- ui: 修复作业页面编辑与删除操作
+- vjudge: 适配 codeforces 新接口
+- core: 过滤空 `$set` 操作
+- ui: domain_dashboard 页显示域创建者
+- judge: 修复 hack
+- core: 提交时检查所选语言是否存在
+
+### Hydro 4.7.0 / UI 4.47.0
+- core: 支持检测导致启动卡死的问题
+- core: 修复特定情况下 rating 信息无法写入的问题
+- core: 添加更多 validator 字段类型支持，移除旧版 validator
+- core&ui: 支持 CORS
+- ui: 支持模块懒加载
+- ui: 修复邮箱登录
+- ui: 修复站内信显示异常的问题
+- vjudge: luogu: 修复登录
+- judge: 修复客观题部分题目未答导致评测出错的问题
+- core: `ConnectionHandler` 支持 `@subscribe(event)`
+- util: 修复 `Message.sendNotification` 格式化异常的问题
+- core: 数据库优化
+- core: 校验用户头像
+- judge: 移除 onDestory 钩子，使用 disposables 替代
+- ui: 优化资源加载
+
+### Hydro 4.6.0 / UI 4.46.0
+- core&ui: 添加 webauthn 支持
+- ui: 修复题解投票
+- ui: 优化比赛详情页布局
+- ui: 修复快捷搜索中评测记录链接
+- core: 添加 `Types.ArrayOf()` 支持
+- ui: 修复侧栏预览保存
+- core: 添加 CookieDomain 设置
+- ui: 修复 dev 模式下页面无限刷新的问题
+- vjudge: 提供 BasicFetcher 组件
+- core: DomainModel 缓存
+- core&ui: 其他漏洞修复
 
 ### Hydro 4.5.2 / UI 4.45.1
 - core: 添加乐多赛支持
@@ -204,4 +287,8 @@ Telegram [@webpack_exports_undefined](https://t.me/webpack_exports_undefined)
 
 - [Github](https://github.com/) 为 Hydro 提供了代码托管与自动构建。  
 - [criyle](https://github.com/criyle) 提供评测沙箱实现。  
-- [Vijos](https://github.com/vijos/vj4) 为 Hydro 提供了UI框架。  
+- [Vijos](https://github.com/vijos/vj4) 为 Hydro 提供了 UI 框架。  
+
+## Sponsors
+
+- [云斗学院](https://www.yundouxueyuan.com)

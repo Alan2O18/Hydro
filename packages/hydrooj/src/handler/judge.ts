@@ -1,7 +1,7 @@
 import assert from 'assert';
 import yaml from 'js-yaml';
 import { omit } from 'lodash';
-import { ObjectID } from 'mongodb';
+import { ObjectId } from 'mongodb';
 import {
     JudgeResultBody, ProblemConfigFile, RecordDoc, TestCase,
 } from '../interface';
@@ -18,26 +18,31 @@ import task from '../model/task';
 import * as bus from '../service/bus';
 import { updateJudge } from '../service/monitor';
 import {
-    ConnectionHandler, Handler, post, Types,
+    ConnectionHandler, Handler, post, subscribe, Types,
 } from '../service/server';
 import { sleep } from '../utils';
 
 const logger = new Logger('judge');
 
-export async function next(body: Partial<JudgeResultBody>) {
-    body.rid = new ObjectID(body.rid);
-    let rdoc = await record.get(body.rid);
-    if (!rdoc) return;
+function parseCaseResult(body: TestCase): Required<TestCase> {
+    return {
+        ...body,
+        id: body.id || 0,
+        subtaskId: body.subtaskId || 0,
+        score: body.score || 0,
+        message: body.message || '',
+    };
+}
+
+function processPayload(rdoc: RecordDoc, body: Partial<JudgeResultBody>) {
     const $set: Partial<RecordDoc> = {};
     const $push: any = {};
-    if (body.case) {
-        const c: Required<TestCase> = {
-            ...body.case,
-            id: body.case.id || 0,
-            subtaskId: body.case.subtaskId || 0,
-            score: body.case.score || 0,
-            message: body.case.message || '',
-        };
+    if (body.cases?.length) {
+        const c = body.cases.map(parseCaseResult);
+        rdoc.testCases.push(...c);
+        $push.testCases = { $each: c };
+    } else if (body.case) {
+        const c = parseCaseResult(body.case);
         rdoc.testCases.push(c);
         $push.testCases = c;
     }
@@ -50,10 +55,19 @@ export async function next(body: Partial<JudgeResultBody>) {
         $push.compilerTexts = body.compilerText;
     }
     if (body.status) $set.status = body.status;
-    if (body.score !== undefined) $set.score = body.score;
-    if (body.time !== undefined) $set.time = body.time;
-    if (body.memory !== undefined) $set.memory = body.memory;
+    if (Number.isFinite(body.score)) $set.score = Math.floor(body.score * 100) / 100;
+    if (Number.isFinite(body.time)) $set.time = body.time;
+    if (Number.isFinite(body.memory)) $set.memory = body.memory;
     if (body.progress !== undefined) $set.progress = body.progress;
+    if (body.subtasks) $set.subtasks = body.subtasks;
+    return { $set, $push };
+}
+
+export async function next(body: Partial<JudgeResultBody>) {
+    body.rid = new ObjectId(body.rid);
+    let rdoc = await record.get(body.rid);
+    if (!rdoc) return;
+    const { $set, $push } = processPayload(rdoc, body);
     rdoc = await record.update(rdoc.domainId, body.rid, $set, $push, {}, body.addProgress ? { progress: body.addProgress } : {});
     bus.broadcast('record/change', rdoc!, $set, $push);
 }
@@ -65,7 +79,7 @@ export async function postJudge(rdoc: RecordDoc) {
     if (rdoc.contest) {
         await contest.updateStatus(
             rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id,
-            rdoc.pid, rdoc.status, rdoc.score,
+            rdoc.pid, rdoc.status, rdoc.score, rdoc.subtasks,
         );
     } else if (accept && updated) await domain.incUserInDomain(rdoc.domainId, rdoc.uid, 'nAccept', 1);
     const isNormalSubmission = ![
@@ -100,7 +114,7 @@ export async function postJudge(rdoc: RecordDoc) {
                 const rdocs = await record.getMulti(rdoc.domainId, {
                     pid: rdoc.pid,
                     status: STATUS.STATUS_ACCEPTED,
-                    contest: { $ne: new ObjectID('0'.repeat(24)) },
+                    contest: { $ne: new ObjectId('0'.repeat(24)) },
                 }).project({ _id: 1, contest: 1 }).toArray();
                 const priority = await record.submissionPriority(rdoc.uid, -5000 - rdocs.length * 5 - 50);
                 await record.judge(rdoc.domainId, rdocs.map((r) => r._id), priority, {}, { hackRejudge: input });
@@ -115,24 +129,11 @@ export async function postJudge(rdoc: RecordDoc) {
 }
 
 export async function end(body: Partial<JudgeResultBody>) {
-    body.rid &&= new ObjectID(body.rid);
+    body.rid &&= new ObjectId(body.rid);
     let rdoc = await record.get(body.rid);
     if (!rdoc) return;
-    const $set: Partial<RecordDoc> = {};
-    const $push: any = {};
+    const { $set, $push } = processPayload(rdoc, body);
     const $unset: any = { progress: '' };
-    if (body.message) {
-        rdoc.judgeTexts.push(body.message);
-        $push.judgeTexts = body.message;
-    }
-    if (body.compilerText) {
-        rdoc.compilerTexts.push(body.compilerText);
-        $push.compilerTexts = body.compilerText;
-    }
-    if (body.status) $set.status = body.status;
-    if (Number.isFinite(body.score)) $set.score = Math.floor(body.score * 100) / 100;
-    if (Number.isFinite(body.time)) $set.time = body.time;
-    if (Number.isFinite(body.memory)) $set.memory = body.memory;
     $set.judgeAt = new Date();
     $set.judger = body.judger ?? 1;
     await sleep(100); // Make sure that all 'next' event already triggered
@@ -180,29 +181,30 @@ class JudgeConnectionHandler extends ConnectionHandler {
 
     async prepare() {
         logger.info('Judge daemon connected from ', this.request.ip);
-        this.send({ language: setting.langs });
-        this.sendLanguageConfig = this.sendLanguageConfig.bind(this);
-        bus.on('system/setting', this.sendLanguageConfig);
+        this.sendLanguageConfig();
         // Ensure language sent
         await sleep(100);
         this.newTask();
     }
 
-    async sendLanguageConfig() {
+    @subscribe('system/setting')
+    sendLanguageConfig() {
         this.send({ language: setting.langs });
     }
 
     async newTask() {
         if (this.processing) return;
         let t;
+        let rdoc: RecordDoc;
         while (!t) {
             if (this.closed) return;
-            // eslint-disable-next-line no-await-in-loop
+            /* eslint-disable no-await-in-loop */
             t = await task.getFirst(this.query);
-            // eslint-disable-next-line no-await-in-loop
             if (!t) await sleep(500);
+            else rdoc = await record.get(t.domainId, t.rid);
+            /* eslint-enable no-await-in-loop */
+            if (!rdoc) t = null;
         }
-        let rdoc = await record.get(t.domainId, t.rid);
         this.send({ task: { ...rdoc, ...t } });
         this.processing = t;
         const $set = { status: builtin.STATUS.STATUS_FETCHED };
@@ -211,7 +213,11 @@ class JudgeConnectionHandler extends ConnectionHandler {
     }
 
     async message(msg) {
-        if (msg.key !== 'ping' && msg.key !== 'prio') logger[['status', 'next'].includes(msg.key) ? 'debug' : 'info']('%o', omit(msg, 'key'));
+        if (msg.key !== 'ping' && msg.key !== 'prio') {
+            const method = ['status', 'next'].includes(msg.key) ? 'debug' : 'info';
+            const keys = method === 'debug' ? ['key'] : ['key', 'subtasks', 'cases'];
+            logger[method]('%o', omit(msg, keys));
+        }
         if (msg.key === 'next') await next(msg);
         else if (msg.key === 'end') {
             if (!msg.nop) await end({ judger: this.user._id, ...msg }).catch((e) => logger.error(e));
@@ -226,7 +232,6 @@ class JudgeConnectionHandler extends ConnectionHandler {
 
     async cleanup() {
         logger.info('Judge daemon disconnected from ', this.request.ip);
-        bus.off('system/setting', this.sendLanguageConfig);
         if (this.processing) {
             await record.reset(this.processing.domainId, this.processing.rid, false);
             await task.add(this.processing);

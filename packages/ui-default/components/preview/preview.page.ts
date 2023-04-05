@@ -71,10 +71,10 @@ async function previewPDF(link) {
   const id = nanoid();
   const dialog = new InfoDialog({
     $body: tpl`
-      <div class="typo">
+      <div class="typo" style="height: 100%;">
         <object classid="clsid:${(uuid.substring(uuid.lastIndexOf('/') + 1))}">
           <param name="SRC" value="${link}" >
-          <embed width="100%" style="height: 70vh;border: none;" src="${link}">
+          <embed width="100%" style="height: 100%;border: none;" src="${link}">
             <noembed></noembed>
           </embed>
         </object>
@@ -105,7 +105,7 @@ async function previewOffice(link, src) {
   if (action === 'download') window.open(link);
 }
 
-export async function previewFile(ev, type = '') {
+export async function previewFile(ev?, type = '') {
   if (ev?.metaKey || ev?.ctrlKey || ev?.shiftKey) return null;
   if (ev) ev.preventDefault();
   const filename = ev
@@ -120,7 +120,7 @@ export async function previewFile(ev, type = '') {
   if (ev) {
     const link = $(ev.currentTarget).find('a').attr('href');
     if (!link) return null;
-    if (!type) type = ev.currentTarget.getAttribute('data-preview');
+    type ||= ev.currentTarget.getAttribute('data-preview');
     const ext = filename.split('.').pop();
     if (['zip', 'rar', '7z'].includes(ext) || filesize > 8 * 1024 * 1024) {
       const action = await new ActionDialog({
@@ -133,7 +133,7 @@ export async function previewFile(ev, type = '') {
     if (ext === 'pdf') return previewPDF(`${link}${link.includes('?') ? '&' : '?'}noDisposition=1`);
     Notification.info(i18n('Loading file...'));
     try {
-      const { url } = await request.get(link, {}, { headers: { 'Do-Not-Cache': 'on' } });
+      const { url } = await request.get(link, {}, { headers: { Pragma: 'no-cache' } });
       if (/^(doc|xls|ppt)x?$/.test(ext)) return previewOffice(link, url);
       content = await request.get(url, undefined, { dataType: 'text' });
     } catch (e) {
@@ -146,8 +146,8 @@ export async function previewFile(ev, type = '') {
   const file = new File([val], filename, { type: 'text/plain' });
   const endpoint = new URL(!window.location.href.endsWith('/files')
     ? `${window.location.href.substring(0, window.location.href.lastIndexOf('/'))}/files` : '', window.location.href);
-  const sidebarType = $(ev.currentTarget).closest('[data-fragment-id]').data('type');
-  const sidebar = $(ev.currentTarget).closest('[data-fragment-id]').data('sidebar') !== undefined;
+  const sidebarType = type || $(ev.currentTarget).closest('[data-fragment-id]').data('type');
+  const sidebar = ev && $(ev.currentTarget).closest('[data-fragment-id]').data('sidebar') !== undefined;
   await uploadFiles(endpoint.toString(), [file], {
     type: sidebarType || type,
     sidebar,

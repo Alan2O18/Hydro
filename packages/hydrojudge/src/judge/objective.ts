@@ -1,6 +1,5 @@
 import assert from 'assert';
-import { readFile } from 'fs-extra';
-import { yaml } from '@hydrooj/utils';
+import { fs, yaml } from '@hydrooj/utils';
 import { STATUS } from '@hydrooj/utils/lib/status';
 import { FormatError } from '../error';
 import { Context } from './interface';
@@ -10,7 +9,7 @@ export async function judge({
 }: Context) {
     next({ status: STATUS.STATUS_JUDGING, progress: 0 });
     const answer = ('src' in code)
-        ? await readFile(code.src, 'utf-8')
+        ? await fs.readFile(code.src, 'utf-8')
         : ('content' in code)
             ? code.content.toString().replace(/\r/g, '')
             : '';
@@ -30,6 +29,7 @@ export async function judge({
     }
     let totalScore = 0;
     let totalStatus = 0;
+    const subtasks = {};
     if (!Object.keys(config.answers).length) throw new FormatError('Invalid standard answer.');
     for (const key in config.answers) {
         const ansInfo = config.answers[key] as [string | string[], number] | Record<string, number>;
@@ -38,6 +38,11 @@ export async function judge({
             const [subtaskId, caseId] = key.split('-').map(Number);
             totalScore += score;
             totalStatus = Math.max(totalStatus, status);
+            subtasks[subtaskId] ||= { score, status };
+            if (subtasks[subtaskId].status && caseId) {
+                subtasks[subtaskId].score += score;
+                subtasks[subtaskId].status = Math.max(subtasks[subtaskId].status, status);
+            }
             next({
                 status: totalStatus,
                 case: {
@@ -51,22 +56,27 @@ export async function judge({
                 },
             });
         };
-        const usrAns = answers[key].toString();
+        if (!answers[key]) {
+            report(STATUS.STATUS_WRONG_ANSWER, 0, 'No answer');
+            continue;
+        }
+        const usrAns = answers[key].toString().trim();
         if (ansInfo instanceof Array) {
             const fullScore = (+ansInfo[1]) || 0;
             const stdAns = ansInfo[0];
             if (stdAns instanceof Array) {
+                const stdSet = new Set(stdAns);
                 const ans = new Set(answers[key] instanceof Array ? answers[key] : [answers[key]]);
-                if (stdAns.length === ans.size && Set.isSuperset(ans, stdAns)) report(STATUS.STATUS_ACCEPTED, fullScore, 'Correct');
-                else if (ans.size && Set.isSuperset(ans, stdAns)) report(STATUS.STATUS_WRONG_ANSWER, Math.floor(fullScore / 2), 'Partially Correct');
+                if (stdAns.length === ans.size && Set.isSuperset(stdSet, ans)) report(STATUS.STATUS_ACCEPTED, fullScore, 'Correct');
+                else if (ans.size && Set.isSuperset(stdSet, ans)) report(STATUS.STATUS_WRONG_ANSWER, Math.floor(fullScore / 2), 'Partially Correct');
                 else report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
-            } else if (stdAns.toString() === usrAns.trim()) report(STATUS.STATUS_ACCEPTED, fullScore, 'Correct  ');
+            } else if (stdAns.toString() === usrAns) report(STATUS.STATUS_ACCEPTED, fullScore, 'Correct');
             else report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
         } else if (!ansInfo[usrAns]) report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
         else report(STATUS.STATUS_ACCEPTED, +ansInfo[usrAns] || 0, 'Correct');
     }
     end({
-        status: totalStatus, score: totalScore, time: 0, memory: 0,
+        status: totalStatus, score: totalScore, time: 0, memory: 0, subtasks,
     });
     return null;
 }

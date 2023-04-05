@@ -1,15 +1,16 @@
+import { generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import moment from 'moment-timezone';
-import notp from 'notp';
-import b32 from 'thirty-two';
+import type { Binary } from 'mongodb';
+import { Time } from '@hydrooj/utils';
 import {
-    BlacklistedError, BuiltinLoginError, ForbiddenError, InvalidTokenError,
-    SystemError, TFAOperationError, UserAlreadyExistError, UserFacingError,
+    AuthOperationError, BlacklistedError, BuiltinLoginError, ForbiddenError, InvalidTokenError,
+    SystemError, UserAlreadyExistError, UserFacingError,
     UserNotFoundError, ValidationError, VerifyPasswordError,
 } from '../error';
 import { Udoc, User } from '../interface';
 import avatar from '../lib/avatar';
 import { sendMail } from '../lib/mail';
-import { isEmail, isPassword } from '../lib/validator';
+import { verifyTFA } from '../lib/verifyTFA';
 import BlackListModel from '../model/blacklist';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as ContestModel from '../model/contest';
@@ -21,17 +22,11 @@ import ScheduleModel from '../model/schedule';
 import SolutionModel from '../model/solution';
 import * as system from '../model/system';
 import token from '../model/token';
-import user from '../model/user';
+import user, { deleteUserCache } from '../model/user';
 import {
     Handler, param, post, Types,
 } from '../service/server';
 import { registerResolver, registerValue } from './api';
-
-function verifyToken(secret: string, code?: string) {
-    if (!code || !code.length) return null;
-    const bin = b32.decode(secret);
-    return notp.totp.verify(code.replace(/\W+/g, ''), bin);
-}
 
 registerValue('User', [
     ['_id', 'Int!'],
@@ -44,34 +39,9 @@ registerValue('User', [
     ['priv', 'Int!', 'User Privilege'],
     ['avatarUrl', 'String'],
     ['tfa', 'Boolean!'],
+    ['authn', 'Boolean!'],
     ['displayName', 'String'],
 ]);
-
-registerResolver(
-    'User', 'TFA', 'TFAContext', () => ({}),
-    'Two Factor Authentication Config',
-);
-registerResolver(
-    'TFAContext', 'enable(secret: String!, code: String!)', 'Boolean!',
-    async (arg, ctx) => {
-        if (ctx.user._tfa) throw new TFAOperationError('enabled');
-        if (!verifyToken(arg.secret, arg.code)) throw new InvalidTokenError('2FA');
-        await user.setById(ctx.user._id, { tfa: arg.secret });
-        // TODO: return backup codes
-        return true;
-    },
-    'Enable Two Factor Authentication for current user',
-);
-registerResolver(
-    'TFAContext', 'disable(code: String!)', 'Boolean!',
-    async (arg, ctx) => {
-        if (!ctx.user._tfa) throw new TFAOperationError('disabled');
-        if (!verifyToken(ctx.user._tfa, arg.code)) throw new InvalidTokenError('2FA');
-        await user.setById(ctx.user._id, undefined, { tfa: '' });
-        return true;
-    },
-    'Disable Two Factor Authentication for current user',
-);
 
 registerResolver('Query', 'user(id: Int, uname: String, mail: String)', 'User', (arg, ctx) => {
     if (arg.id) return user.getById(ctx.args.domainId, arg.id);
@@ -112,21 +82,41 @@ class UserLoginHandler extends Handler {
     }
 
     @param('uname', Types.Username)
-    @param('password', Types.String)
+    @param('password', Types.Password)
     @param('rememberme', Types.Boolean)
     @param('redirect', Types.String, true)
     @param('tfa', Types.String, true)
-    async post(domainId: string, uname: string, password: string, rememberme = false, redirect = '', tfa = '') {
+    @param('authnChallenge', Types.String, true)
+    async post(
+        domainId: string, uname: string, password: string, rememberme = false, redirect = '',
+        tfa = '', authnChallenge = '',
+    ) {
         if (!system.get('server.login')) throw new BuiltinLoginError();
         let udoc = await user.getByEmail(domainId, uname);
         udoc ||= await user.getByUname(domainId, uname);
         if (!udoc) throw new UserNotFoundError(uname);
+        if (system.get('system.contestmode') && !udoc.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            if (udoc._loginip && udoc._loginip !== this.request.ip) throw new ValidationError('ip');
+            if (system.get('system.contestmode') === 'strict') {
+                const udocs = await user.getMulti({ loginip: this.request.ip, _id: { $ne: udoc._id } }).toArray();
+                if (udocs.length) throw new ValidationError('ip');
+            }
+        }
         await Promise.all([
             this.limitRate('user_login', 60, 30, false),
             this.limitRate(`user_login_${uname}`, 60, 5, false),
             oplog.log(this, 'user.login', { redirect }),
         ]);
-        if (udoc._tfa && !verifyToken(udoc._tfa, tfa)) throw new InvalidTokenError('2FA');
+        if (udoc.tfa || udoc.authn) {
+            if (udoc.tfa && tfa) {
+                if (!verifyTFA(udoc._tfa, tfa)) throw new InvalidTokenError('2FA');
+            } else if (udoc.authn && authnChallenge) {
+                const challenge = await token.get(authnChallenge, token.TYPE_WEBAUTHN);
+                if (!challenge || challenge.uid !== udoc._id) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
+                if (!challenge.verified) throw new ValidationError('challenge');
+                await token.del(authnChallenge, token.TYPE_WEBAUTHN);
+            } else throw new ValidationError('2FA', 'Authn');
+        }
         udoc.checkPassword(password);
         await user.setById(udoc._id, { loginat: new Date(), loginip: this.request.ip });
         if (!udoc.hasPriv(PRIV.PRIV_USER_PROFILE)) throw new BlacklistedError(uname, udoc.banReason);
@@ -148,25 +138,77 @@ class UserSudoHandler extends Handler {
         this.response.template = 'user_sudo.html';
     }
 
-    @param('password', Types.String)
+    @param('password', Types.String, true)
     @param('tfa', Types.String, true)
-    async post(domainId: string, password: string, tfa = '') {
+    @param('authnChallenge', Types.String, true)
+    async post(domainId: string, password = '', tfa = '', authnChallenge = '') {
         if (!this.session.sudoArgs?.method) throw new ForbiddenError();
         await Promise.all([
             this.limitRate('user_sudo', 60, 5, true),
             oplog.log(this, 'user.sudo', {}),
         ]);
-        if (tfa) {
-            if (!this.user._tfa || !verifyToken(this.user._tfa, tfa)) throw new InvalidTokenError('2FA');
-        } else {
-            this.user.checkPassword(password);
-        }
+        if (this.user.authn && authnChallenge) {
+            const challenge = await token.get(authnChallenge, token.TYPE_WEBAUTHN);
+            if (challenge?.uid !== this.user._id) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
+            if (!challenge.verified) throw new ValidationError('challenge');
+            await token.del(authnChallenge, token.TYPE_WEBAUTHN);
+        } else if (this.user.tfa && tfa) {
+            if (!verifyTFA(this.user._tfa, tfa)) throw new InvalidTokenError('2FA');
+        } else this.user.checkPassword(password);
         this.session.sudo = Date.now();
         if (this.session.sudoArgs.method.toLowerCase() !== 'get') {
             this.response.template = 'user_sudo_redirect.html';
             this.response.body = this.session.sudoArgs;
         } else this.response.redirect = this.session.sudoArgs.redirect;
         this.session.sudoArgs.method = null;
+    }
+}
+
+class UserWebauthnHandler extends Handler {
+    noCheckPermView = true;
+
+    @param('uname', Types.Username, true)
+    async get(domainId: string, uname: string) {
+        const udoc = this.user._id ? this.user : ((await user.getByEmail(domainId, uname)) || await user.getByUname(domainId, uname));
+        if (!udoc._id) throw new UserNotFoundError(uname || 'user');
+        if (!udoc.authn) throw new AuthOperationError('authn', 'disabled');
+        const options = generateAuthenticationOptions({
+            allowCredentials: udoc._authenticators.map((authenticator) => ({
+                id: authenticator.credentialID.buffer,
+                type: 'public-key',
+            })),
+            userVerification: 'preferred',
+        });
+        await token.add(token.TYPE_WEBAUTHN, 60, { uid: udoc._id }, options.challenge);
+        this.session.challenge = options.challenge;
+        this.response.body.authOptions = options;
+    }
+
+    async post({ domainId, result }) {
+        const challenge = this.session.challenge;
+        if (!challenge) throw new ForbiddenError();
+        const tdoc = await token.get(challenge, token.TYPE_WEBAUTHN);
+        if (!tdoc) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
+        const udoc = await user.getById(domainId, tdoc.uid);
+        const parseId = (id: Binary) => Buffer.from(id.toString('hex'), 'hex').toString('base64url');
+        const authenticator = udoc._authenticators?.find((c) => parseId(c.credentialID) === result.id);
+        if (!authenticator) throw new ValidationError('authenticator');
+        const verification = await verifyAuthenticationResponse({
+            response: result,
+            expectedChallenge: challenge,
+            expectedOrigin: this.request.headers.origin,
+            expectedRPID: this.request.hostname,
+            authenticator: {
+                ...authenticator,
+                credentialID: authenticator.credentialID.buffer,
+                credentialPublicKey: authenticator.credentialPublicKey.buffer,
+            },
+        }).catch(() => null);
+        if (!verification?.verified) throw new ValidationError('authenticator');
+        authenticator.counter = verification.authenticationInfo.newCounter;
+        await user.setById(udoc._id, { authenticators: udoc._authenticators });
+        await token.update(challenge, token.TYPE_WEBAUTHN, 60, { verified: true });
+        this.back();
     }
 }
 
@@ -192,7 +234,7 @@ export class UserRegisterHandler extends Handler {
         this.response.template = 'user_register.html';
     }
 
-    @post('mail', Types.String, true, isEmail)
+    @post('mail', Types.Email, true)
     @post('phone', Types.String, true, (s) => /^\d{11}$/.test(s))
     async post(domainId: string, mail: string, phoneNumber: string) {
         if (mail) {
@@ -223,13 +265,15 @@ export class UserRegisterHandler extends Handler {
         } else if (phoneNumber) {
             if (!global.Hydro.lib.sendSms) throw new SystemError('Cannot send sms');
             await this.limitRate('send_sms', 60, 3);
-            const t = await token.add(
+            const id = String.random(6, '0123456789');
+            await token.add(
                 token.TYPE_REGISTRATION,
-                system.get('session.unsaved_expire_seconds'),
+                10 * Time.minute,
                 { phone: phoneNumber },
-                String.random(6),
+                id,
             );
-            await global.Hydro.lib.sendSms(phoneNumber, 'register', t[0]);
+            await global.Hydro.lib.sendSms(phoneNumber, 'register', id);
+            this.response.body = { phone: phoneNumber };
             this.response.template = 'user_register_sms.html';
         } else throw new ValidationError('mail');
     }
@@ -246,8 +290,8 @@ class UserRegisterWithCodeHandler extends Handler {
         this.response.body = tdoc;
     }
 
-    @param('password', Types.String, isPassword)
-    @param('verifyPassword', Types.String)
+    @param('password', Types.Password)
+    @param('verifyPassword', Types.Password)
     @param('uname', Types.Username)
     @param('code', Types.String)
     async post(
@@ -261,10 +305,11 @@ class UserRegisterWithCodeHandler extends Handler {
         const uid = await user.create(tdoc.mail, uname, password, undefined, this.request.ip);
         await token.del(code, token.TYPE_REGISTRATION);
         const [id, mailDomain] = tdoc.mail.split('@');
-        const $set: any = {};
+        const $set: any = tdoc.set || {};
         if (mailDomain === 'qq.com' && !Number.isNaN(+id)) $set.avatar = `qq:${id}`;
         if (this.session.viewLang) $set.viewLang = this.session.viewLang;
         if (Object.keys($set).length) await user.setById(uid, $set);
+        if (tdoc.oauth) await oauth.set(tdoc.oauth[1], uid);
         this.session.viewLang = '';
         this.session.uid = uid;
         this.session.scope = PERM.PERM_ALL.toString();
@@ -279,7 +324,7 @@ class UserLostPassHandler extends Handler {
         this.response.template = 'user_lostpass.html';
     }
 
-    @param('mail', Types.String, isEmail)
+    @param('mail', Types.Email)
     async post(domainId: string, mail: string) {
         if (!system.get('smtp.user')) throw new SystemError('Cannot send mail');
         const udoc = await user.getByEmail('system', mail);
@@ -314,8 +359,8 @@ class UserLostPassWithCodeHandler extends Handler {
     }
 
     @param('code', Types.String)
-    @param('password', Types.String, isPassword)
-    @param('verifyPassword', Types.String)
+    @param('password', Types.Password)
+    @param('verifyPassword', Types.Password)
     async post(domainId: string, code: string, password: string, verifyPassword: string) {
         const tdoc = await token.get(code, token.TYPE_LOSTPASS);
         if (!tdoc) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_LOSTPASS], code);
@@ -396,7 +441,7 @@ class UserDeleteHandler extends Handler {
 class OauthHandler extends Handler {
     noCheckPermView = true;
 
-    @param('type', Types.String)
+    @param('type', Types.Key)
     async get(domainId: string, type: string) {
         await global.Hydro.module.oauth[type]?.get.call(this);
     }
@@ -413,6 +458,7 @@ class OauthCallbackHandler extends Handler {
             await user.setById(uid, { loginat: new Date(), loginip: this.request.ip });
             this.session.uid = uid;
             this.session.scope = PERM.PERM_ALL.toString();
+            this.response.redirect = '/';
         } else {
             if (r.email) {
                 const udoc = await user.getByEmail('system', r.email);
@@ -427,7 +473,6 @@ class OauthCallbackHandler extends Handler {
             this.checkPriv(PRIV.PRIV_REGISTER_USER);
             let username = '';
             r.uname ||= [];
-            r.uname.push(String.random(16));
             const mailDomain = r.email.split('@')[1];
             if (await BlackListModel.get(`mail::${mailDomain}`)) throw new BlacklistedError(mailDomain);
             for (const uname of r.uname) {
@@ -438,33 +483,49 @@ class OauthCallbackHandler extends Handler {
                     break;
                 }
             }
-            const _id = await user.create(
-                r.email, username, String.random(32),
-                undefined, this.request.ip,
+            const set: Partial<Udoc> = { oauth: args.type };
+            if (r.bio) set.bio = r.bio;
+            if (r.viewLang) set.viewLang = r.viewLang;
+            if (r.avatar) set.avatar = r.avatar;
+            const [t] = await token.add(
+                token.TYPE_REGISTRATION,
+                system.get('session.unsaved_expire_seconds'),
+                {
+                    mail: r.email,
+                    username,
+                    redirect: this.domain.registerRedirect,
+                    set,
+                    oauth: [args.type, r.email],
+                },
             );
-            const $set: Partial<Udoc> = {
-                oauth: args.type,
-                loginat: new Date(),
-                loginip: this.request.ip,
-            };
-            if (r.bio) $set.bio = r.bio;
-            if (r.viewLang) $set.viewLang = r.viewLang;
-            if (r.avatar) $set.avatar = r.avatar;
-            await Promise.all([
-                user.setById(_id, $set),
-                oauth.set(r.email, _id),
-            ]);
-            this.session.uid = _id;
-            this.session.scope = PERM.PERM_ALL.toString();
+            this.response.redirect = this.url('user_register_with_code', { code: t });
         }
-        this.response.redirect = '/';
+    }
+}
+
+class ContestModeHandler extends Handler {
+    async get() {
+        const bindings = await user.getMulti({ loginip: { $exists: true } })
+            .project<{ _id: number, loginip: string }>({ _id: 1, loginip: 1 }).toArray();
+        this.response.body = { bindings };
+        this.response.template = 'contest_mode.html';
+    }
+
+    @param('uid', Types.Int, true)
+    async postReset(domainId: string, uid: number) {
+        if (uid) await user.setById(uid, {}, { loginip: '' });
+        else {
+            await user.coll.updateMany({}, { $unset: { loginip: 1 } });
+            deleteUserCache(true);
+        }
     }
 }
 
 export async function apply(ctx) {
     ctx.Route('user_login', '/login', UserLoginHandler);
     ctx.Route('user_oauth', '/oauth/:type', OauthHandler);
-    ctx.Route('user_sudo', '/user/sudo', UserSudoHandler);
+    ctx.Route('user_sudo', '/user/sudo', UserSudoHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('user_webauthn', '/user/webauthn', UserWebauthnHandler);
     ctx.Route('user_oauth_callback', '/oauth/:type/callback', OauthCallbackHandler);
     ctx.Route('user_register', '/register', UserRegisterHandler, PRIV.PRIV_REGISTER_USER);
     ctx.Route('user_register_with_code', '/register/:code', UserRegisterWithCodeHandler, PRIV.PRIV_REGISTER_USER);
@@ -473,4 +534,7 @@ export async function apply(ctx) {
     ctx.Route('user_lostpass_with_code', '/lostpass/:code', UserLostPassWithCodeHandler);
     ctx.Route('user_delete', '/user/delete', UserDeleteHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('user_detail', '/user/:uid(-?\\d+)', UserDetailHandler);
+    if (system.get('server.contestmode')) {
+        ctx.Route('contest_mode', '/contestmode', ContestModeHandler, PRIV.PRIV_EDIT_SYSTEM);
+    }
 }

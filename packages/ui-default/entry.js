@@ -1,16 +1,14 @@
 import $ from 'jquery';
-import * as bus from './bus';
 
 window.Hydro = {
   extraPages: [],
-  preload: [],
   components: {},
   utils: {},
   node_modules: {},
   version: process.env.VERSION,
-  bus,
 };
 window.externalModules = {};
+window.lazyModuleResolver = {};
 
 console.log(
   '%c%s%c%s',
@@ -27,33 +25,32 @@ console.log(
 `,
 );
 
+window.UiContext = JSON.parse(window.UiContext);
+window.UserContext = JSON.parse(window.UserContext);
+try { __webpack_public_path__ = UiContext.cdn_prefix; } catch (e) { }
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').then((registration) => {
-      console.log('SW registered: ', registration);
-    }).catch((registrationError) => {
-      console.log('SW registration failed: ', registrationError);
-    });
+  const encodedConfig = encodeURIComponent(JSON.stringify(UiContext.SWConfig));
+  navigator.serviceWorker.register(`/service-worker.js?config=${encodedConfig}`).then((registration) => {
+    console.log('SW registered: ', registration);
+  }).catch((registrationError) => {
+    console.log('SW registration failed: ', registrationError);
   });
 }
 
+const PageLoader = '<div class="page-loader nojs--hide" style="display:none;"><div class="loader"></div></div>';
+$('body').prepend(PageLoader);
+$('.page-loader').fadeIn(500);
+
+const prefetch = Promise.all([
+  fetch(`/constant/${UiContext.constantVersion}.js`).then((r) => r.text()),
+  import('./api'),
+]);
+
 document.addEventListener('DOMContentLoaded', async () => {
-  window.UiContext = JSON.parse(window.UiContext);
-
-  const PageLoader = '<div class="page-loader nojs--hide" style="display:none;"><div class="loader"></div></div>';
-  $('body').prepend(PageLoader);
-  $('.page-loader').fadeIn(500);
-  // eslint-disable-next-line camelcase
-  try { __webpack_public_path__ = UiContext.cdn_prefix; } catch (e) { }
-
-  const [data, HydroExports] = await Promise.all([
-    fetch(`/constant/${UiContext.constantVersion}`, { cache: 'force-cache' }).then((r) => r.json()),
-    import('./api'),
-  ]);
+  Object.assign(window.UiContext, JSON.parse(window.UiContextNew));
+  Object.assign(window.UserContext, JSON.parse(window.UserContextNew));
+  const [data, HydroExports] = await prefetch;
   Object.assign(window, { HydroExports });
-  eval(data[0]); // eslint-disable-line no-eval
-  data.shift();
-  window.Hydro.preload = data;
-
-  import('./hydro');
+  eval(data); // eslint-disable-line no-eval
+  await HydroExports.initPageLoader();
 }, false);

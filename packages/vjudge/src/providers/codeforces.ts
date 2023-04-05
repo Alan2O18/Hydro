@@ -2,15 +2,13 @@
 import { PassThrough } from 'stream';
 import yaml from 'js-yaml';
 import { JSDOM } from 'jsdom';
-import superagent from 'superagent';
-import proxy from 'superagent-proxy';
 import {
-    buildContent, Logger, SettingModel, sleep, STATUS,
+    buildContent, Logger, sleep, STATUS,
 } from 'hydrooj';
+import { BasicFetcher } from '../fetch';
 import { IBasicProvider, RemoteAccount } from '../interface';
 import { normalize, VERDICT } from '../verdict';
 
-proxy(superagent);
 const logger = new Logger('remote/codeforces');
 
 function parseProblemId(id: string) {
@@ -61,30 +59,12 @@ ${lines.map((i) => i.innerHTML).join('\n').trim()}
 \n`;
     };
 
-export default class CodeforcesProvider implements IBasicProvider {
+export default class CodeforcesProvider extends BasicFetcher implements IBasicProvider {
     constructor(public account: RemoteAccount, private save: (data: any) => Promise<void>) {
-        if (account.cookie) this.cookie = account.cookie;
-        this.account.endpoint ||= 'https://codeforces.com';
+        super(account, 'https://codeforces.com', 'form', logger);
     }
 
-    cookie: string[] = [];
     csrf: string;
-
-    get(url: string) {
-        logger.debug('get', url);
-        if (!url.includes('//')) url = `${this.account.endpoint}${url}`;
-        const req = superagent.get(url).set('Cookie', this.cookie);
-        if (this.account.proxy) return req.proxy(this.account.proxy);
-        return req;
-    }
-
-    post(url: string) {
-        logger.debug('post', url, this.cookie);
-        if (!url.includes('//')) url = `${this.account.endpoint}${url}`;
-        const req = superagent.post(url).type('form').set('Cookie', this.cookie);
-        if (this.account.proxy) return req.proxy(this.account.proxy);
-        return req;
-    }
 
     getCookie(target: string) {
         return this.cookie.find((i) => i.startsWith(`${target}=`))?.split('=')[1]?.split(';')[0];
@@ -103,8 +83,7 @@ export default class CodeforcesProvider implements IBasicProvider {
     }
 
     async getCsrfToken(url: string) {
-        const { text: html } = await this.get(url);
-        const { window: { document } } = new JSDOM(html);
+        const { document, html } = await this.html(url);
         if (document.body.children.length < 2 && html.length < 512) {
             throw new Error(document.body.textContent);
         }
@@ -147,7 +126,7 @@ export default class CodeforcesProvider implements IBasicProvider {
         const cookie = res.header['set-cookie'];
         if (cookie) {
             await this.save({ cookie });
-            this.cookie = cookie;
+            this.setCookie(cookie);
         }
         if (await this.loggedIn) {
             logger.success('Logged in');
@@ -261,13 +240,12 @@ export default class CodeforcesProvider implements IBasicProvider {
         if (resync && page > 1) return [];
         if (resync && listName.startsWith('GYM')) return [];
         if (listName.startsWith('GYM') && page > 1) return [];
-        const res = await this.get(listName === 'main'
+        const { document } = await this.html(listName === 'main'
             ? `/problemset/page/${page}`
             : listName === 'gym'
                 ? `/gyms/page/${page}`
                 : `/gym/${listName.split('GYM')[1]}`,
         );
-        const { window: { document } } = new JSDOM(res.text);
         if (['gym', 'main'].includes(listName)) {
             const index = document.querySelector('.page-index.active').getAttribute('pageindex');
             if (index !== page.toString()) return [];
@@ -294,34 +272,24 @@ export default class CodeforcesProvider implements IBasicProvider {
 
     async submitProblem(id: string, lang: string, code: string, info, next, end) {
         const programTypeId = lang.includes('codeforces.') ? lang.split('codeforces.')[1] : '54';
-        const comment = SettingModel.langs[lang].comment;
-        if (comment) {
-            const msg = `Hydro submission #${info.rid}@${new Date().getTime()}`;
-            if (typeof comment === 'string') code = `${comment} ${msg}\n${code}`;
-            else if (comment instanceof Array) code = `${comment[0]} ${msg} ${comment[1]}\n${code}`;
-        }
         const [type, contestId, problemId] = parseProblemId(id);
-        const [csrf, ftaa, bfaa] = await this.getCsrfToken(type !== 'GYM'
-            ? '/problemset/submit'
-            : `/gym/${contestId}/submit`);
+        const endpoint = type === 'GYM'
+            ? `/gym/${contestId}/submit`
+            : `/problemset/submit/${contestId}/${problemId}`;
+        const [csrf, ftaa, bfaa] = await this.getCsrfToken(endpoint);
         // TODO check submit time to ensure submission
-        const { text: submit } = await this.post(`/${type !== 'GYM' ? 'problemset' : `gym/${contestId}`}/submit?csrf_token=${csrf}`).send({
+        const { text: submit } = await this.post(`${endpoint}?csrf_token=${csrf}`).send({
             csrf_token: csrf,
             action: 'submitSolutionFormSubmitted',
             programTypeId,
             source: code,
-            tabsize: 4,
+            tabSize: 4,
             sourceFile: '',
             ftaa,
             bfaa,
             _tta: this.tta(this.getCookie('39ce7')),
-            ...(type !== 'GYM')
-                ? {
-                    submittedProblemCode: contestId + problemId,
-                    sourceCodeConfirmed: true,
-                } : {
-                    submittedProblemIndex: problemId,
-                },
+            contestId,
+            submittedProblemIndex: problemId,
         });
         const { window: { document: statusDocument } } = new JSDOM(submit);
         const message = Array.from(statusDocument.querySelectorAll('.error'))
@@ -330,10 +298,9 @@ export default class CodeforcesProvider implements IBasicProvider {
             end({ status: STATUS.STATUS_COMPILE_ERROR, message });
             return null;
         }
-        const { text: status } = await this.get(type !== 'GYM'
+        const { document } = await this.html(type !== 'GYM'
             ? '/problemset/status?my=on'
             : `/gym/${contestId}/my`);
-        const { window: { document } } = new JSDOM(status);
         this.csrf = document.querySelector('meta[name="X-Csrf-Token"]').getAttribute('content');
         return document.querySelector('[data-submission-id]').getAttribute('data-submission-id');
     }
@@ -348,27 +315,29 @@ export default class CodeforcesProvider implements IBasicProvider {
                 submissionId: id,
             });
             if (body.compilationError === 'true') {
-                await next({ compilerText: body['checkerStdoutAndStderr#1'] });
                 return await end({
-                    status: STATUS.STATUS_COMPILE_ERROR, score: 0, time: 0, memory: 0,
+                    compilerText: body['checkerStdoutAndStderr#1'],
+                    status: STATUS.STATUS_COMPILE_ERROR,
+                    score: 0,
+                    time: 0,
+                    memory: 0,
                 });
             }
             const time = Math.sum(Object.keys(body).filter((k) => k.startsWith('timeConsumed#')).map((k) => +body[k]));
             const memory = Math.max(...Object.keys(body).filter((k) => k.startsWith('memoryConsumed#')).map((k) => +body[k])) / 1024;
+            const cases = [];
             for (; i <= +body.testCount; i++) {
                 const status = VERDICT[body[`verdict#${i}`]] || STATUS.STATUS_WRONG_ANSWER;
-                await next({
-                    status: STATUS.STATUS_JUDGING,
-                    case: {
-                        id: +i,
-                        subtaskId: 1,
-                        status,
-                        time: +body[`timeConsumed#${i}`],
-                        memory: +body[`memoryConsumed#${i}`] / 1024,
-                        message: body[`checkerStdoutAndStderr#${i}`] || body[`verdict#${i}`],
-                    },
+                cases.push({
+                    id: +i,
+                    subtaskId: 1,
+                    status,
+                    time: +body[`timeConsumed#${i}`],
+                    memory: +body[`memoryConsumed#${i}`] / 1024,
+                    message: body[`checkerStdoutAndStderr#${i}`] || body[`verdict#${i}`],
                 });
             }
+            if (cases.length) await next({ status: STATUS.STATUS_JUDGING, cases });
             if (body.waiting === 'true') continue;
             const status = VERDICT[Object.keys(VERDICT).find((k) => normalize(body.verdict).includes(k))];
             return await end({

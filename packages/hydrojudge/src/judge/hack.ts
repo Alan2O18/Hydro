@@ -1,6 +1,6 @@
 /* eslint-disable no-sequences */
-import { unlinkSync } from 'fs';
 import { basename } from 'path';
+import { fs } from '@hydrooj/utils';
 import { STATUS } from '@hydrooj/utils/lib/status';
 import checkers from '../checkers';
 import compile, { compileChecker, compileValidator } from '../compile';
@@ -26,14 +26,14 @@ export async function judge(ctx: Context) {
         compileValidator(session.getLang, config.validator, judgeExtraFiles).then(markCleanup),
         ctx.session.fetchFile(ctx.files.hack),
     ]);
-    ctx.clean.push(async () => unlinkSync(input));
+    ctx.clean.push(() => fs.unlink(input));
     ctx.next({ status: STATUS.STATUS_JUDGING, progress: 0 });
     const validateResult = await run(
         validator.execute,
         {
             stdin: { src: input },
             copyIn: { ...validator.copyIn, ...judgeExtraFiles },
-            time: parseTimeMS(ctx.config.time || '1s') * execute.time,
+            time: parseTimeMS(ctx.config.time || '1s'),
             memory: parseMemoryMB(ctx.config.memory || '256m'),
         },
     );
@@ -46,7 +46,7 @@ export async function judge(ctx: Context) {
         {
             stdin: { src: input },
             copyIn: execute.copyIn,
-            time: parseTimeMS(ctx.config.time || '1s') * execute.time,
+            time: parseTimeMS(ctx.config.time || '1s'),
             memory: parseMemoryMB(ctx.config.memory || '256m'),
             cacheStdoutAndStderr: true,
         },
@@ -55,7 +55,7 @@ export async function judge(ctx: Context) {
     let { status } = res;
     let message: any = '';
     if (status === STATUS.STATUS_ACCEPTED) {
-        if (time > ctx.config.time * execute.time) {
+        if (time > ctx.config.time) {
             status = STATUS.STATUS_TIME_LIMIT_EXCEEDED;
         } else if (memory > ctx.config.memory * 1024) {
             status = STATUS.STATUS_MEMORY_LIMIT_EXCEEDED;

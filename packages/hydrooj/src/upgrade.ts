@@ -4,7 +4,7 @@
 import yaml from 'js-yaml';
 import { pick } from 'lodash';
 import moment from 'moment-timezone';
-import { ObjectID } from 'mongodb';
+import { ObjectId } from 'mongodb';
 import { sleep } from '@hydrooj/utils';
 import { buildContent } from './lib/content';
 import { Logger } from './logger';
@@ -17,6 +17,7 @@ import MessageModel from './model/message';
 import problem from './model/problem';
 import RecordModel from './model/record';
 import ScheduleModel from './model/schedule';
+import StorageModel from './model/storage';
 import * as system from './model/system';
 import TaskModel from './model/task';
 import user from './model/user';
@@ -53,16 +54,7 @@ const scripts: UpgradeScript[] = [
     null,
     // Init
     ...new Array(26).fill(unsupportedUpgrade),
-    async function _27_28() {
-        const cursor = document.coll.find({ docType: document.TYPE_DISCUSSION });
-        for await (const data of cursor) {
-            const t = Math.exp(-0.15 * (((new Date().getTime() / 1000) - data._id.generationTime) / 3600));
-            const rCount = await discussion.getMultiReply(data.domainId, data.docId).count();
-            const sort = ((data.sort || 100) + Math.max(rCount - (data.lastRCount || 0), 0) * 10) * t;
-            await document.coll.updateOne({ _id: data._id }, { $set: { sort, lastRCount: rCount } });
-        }
-        return true;
-    },
+    null,
     async function _28_29() {
         return await iterateAllProblem(['content', 'html'], async (pdoc) => {
             try {
@@ -197,8 +189,8 @@ const scripts: UpgradeScript[] = [
                 parentId: { $type: 'string' },
             }).toArray();
             for (const doc of ddocs) {
-                if (ObjectID.isValid(doc.parentId)) {
-                    await document.set(ddoc._id, document.TYPE_DISCUSSION, doc.docId, { parentId: new ObjectID(doc.parentId) });
+                if (ObjectId.isValid(doc.parentId)) {
+                    await document.set(ddoc._id, document.TYPE_DISCUSSION, doc.docId, { parentId: new ObjectId(doc.parentId) });
                 }
             }
         });
@@ -215,7 +207,7 @@ const scripts: UpgradeScript[] = [
         return true;
     },
     async function _48_49() {
-        await RecordModel.coll.updateMany({ input: { $exists: true } }, { $set: { contest: new ObjectID('000000000000000000000000') } });
+        await RecordModel.coll.updateMany({ input: { $exists: true } }, { $set: { contest: new ObjectId('000000000000000000000000') } });
         return true;
     },
     async function _49_50() {
@@ -316,7 +308,7 @@ const scripts: UpgradeScript[] = [
         await iterateAllProblem(['pid', '_id'], async (pdoc) => {
             bulk.find({ _id: pdoc._id }).updateOne({ $set: { sort: sortable(pdoc.pid || `P${pdoc.docId}`) } });
         });
-        if (bulk.length) await bulk.execute();
+        if (bulk.batches.length) await bulk.execute();
         return true;
     },
     async function _55_56() {
@@ -511,6 +503,56 @@ const scripts: UpgradeScript[] = [
     async function _73_74() {
         await db.collection('document').updateMany({ docType: document.TYPE_DISCUSSION }, { $unset: { sort: '' } });
         await ScheduleModel.deleteMany({ subType: 'discussion.sort' });
+        return true;
+    },
+    async function _74_75() {
+        const list = {
+            READ_PRETEST_DATA: 1 << 5,
+            READ_PRETEST_DATA_SELF: 1 << 6,
+            DELETE_FILE_SELF: 1 << 19,
+        };
+        let defaultPriv = system.get('default.priv') as number;
+        for (const key in list) {
+            if (defaultPriv & list[key]) defaultPriv -= list[key];
+        }
+        await system.set('default.priv', defaultPriv);
+        for (const key in list) {
+            await user.coll.updateMany(
+                { priv: { $bitsAllSet: list[key] } },
+                { $inc: { priv: -list[key] } },
+            );
+        }
+        return true;
+    },
+    async function _75_76() {
+        const messages = await db.collection('message').find({ content: { $type: 'object' } }).toArray();
+        for (const m of messages) {
+            let content = '';
+            for (const key in m) content += m[key];
+            await db.collection('message').updateOne({ _id: m._id }, { $set: { content } });
+        }
+        return true;
+    },
+    async function _76_77() {
+        return await iterateAllProblem(['domainId', 'title', 'docId', 'data'], async (pdoc, current, total) => {
+            if (!pdoc.data?.find((i) => i.name.includes('/'))) return;
+            logger.info(pdoc.domainId, pdoc.docId, pdoc.title, pdoc.data.map((i) => i._id));
+            const prefix = `problem/${pdoc.domainId}/${pdoc.docId}/testdata/`;
+            for (const file of pdoc.data) {
+                if (!file._id.includes('/')) continue;
+                let newName = file._id.split('/')[1].toLowerCase();
+                if (pdoc.data.find((i) => i._id === newName)) {
+                    newName = file._id.replace(/\//g, '_').toLowerCase();
+                }
+                await StorageModel.rename(`${prefix}${file._id}`, `${prefix}${newName}`);
+                file._id = newName;
+                file.name = newName;
+            }
+            await problem.edit(pdoc.domainId, pdoc.docId, { data: pdoc.data });
+        });
+    },
+    async function _77_78() {
+        await document.coll.updateMany({ docType: document.TYPE_DISCUSSION }, { $set: { hidden: false } });
         return true;
     },
 ];

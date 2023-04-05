@@ -1,7 +1,11 @@
+import { AttestationFormat } from '@simplewebauthn/server/dist/helpers/decodeAttestationObject';
+import { AuthenticationExtensionsAuthenticatorOutputs } from '@simplewebauthn/server/dist/helpers/decodeAuthenticatorExtensions';
+import { CredentialDeviceType } from '@simplewebauthn/typescript-types';
 import type fs from 'fs';
 import type { Dictionary, NumericDictionary } from 'lodash';
-import type { Cursor, ObjectID } from 'mongodb';
+import type { Binary, FindCursor, ObjectId } from 'mongodb';
 import type { Context } from './context';
+import type { DocStatusType } from './model/document';
 import type { ProblemDoc } from './model/problem';
 import type { Handler } from './service/server';
 
@@ -29,7 +33,6 @@ export interface SystemKeys {
     'limit.problem_files_max': number,
     'problem.categories': string,
     'session.keys': string[],
-    'session.secure': boolean,
     'session.saved_expire_seconds': number,
     'session.unsaved_expire_seconds': number,
     'user.quota': number,
@@ -56,7 +59,25 @@ export interface OAuthUserResponse {
     viewLang?: string;
 }
 
-export interface Udoc extends Dictionary<any> {
+export interface Authenticator {
+    name: string;
+    regat: number;
+
+    fmt: AttestationFormat;
+    counter: number;
+    aaguid: string;
+    credentialID: Binary;
+    credentialPublicKey: Binary;
+    credentialType: 'public-key';
+    attestationObject: Binary;
+    userVerified: boolean;
+    credentialDeviceType: CredentialDeviceType;
+    credentialBackedUp: boolean;
+    authenticatorExtensionResults?: AuthenticationExtensionsAuthenticatorOutputs;
+    authenticatorAttachment: 'platform' | 'cross-platform';
+}
+
+export interface Udoc extends Record<string, any> {
     _id: number;
     mail: string;
     mailLower: string;
@@ -89,14 +110,14 @@ export interface VUdoc {
 }
 
 export interface GDoc {
-    _id: ObjectID;
+    _id: ObjectId;
     domainId: string;
     name: string;
     uids: number[];
 }
 
 export interface UserPreferenceDoc {
-    _id: ObjectID;
+    _id: ObjectId;
     filename: string;
     uid: number;
     content: string;
@@ -180,6 +201,8 @@ export interface ProblemConfigFile {
     subtasks?: SubtaskConfig[];
     langs?: string[];
     validator?: string;
+    time_limit_rate?: Record<string, number>;
+    memory_limit_rate?: Record<string, number>;
 }
 
 export interface ProblemConfig {
@@ -218,7 +241,7 @@ export type ContentNode = PlainContentNode | TextContentNode | SampleContentNode
 export type Content = string | ContentNode[] | Record<string, ContentNode[]>;
 
 export interface Document {
-    _id: ObjectID;
+    _id: ObjectId;
     docId: any;
     docType: number;
     domainId: string;
@@ -257,7 +280,7 @@ export type { ProblemDoc } from './model/problem';
 export type ProblemDict = NumericDictionary<ProblemDoc>;
 
 export interface StatusDocBase {
-    _id: ObjectID,
+    _id: ObjectId,
     docId: any,
     docType: number,
     domainId: string,
@@ -267,7 +290,7 @@ export interface StatusDocBase {
 export interface ProblemStatusDoc extends StatusDocBase {
     docId: number;
     docType: 10;
-    rid?: ObjectID;
+    rid?: ObjectId;
     score?: number;
     status?: number;
     nSubmit?: number;
@@ -286,7 +309,7 @@ export interface TestCase {
 }
 
 export interface RecordDoc {
-    _id: ObjectID;
+    _id: ObjectId;
     domainId: string;
     pid: number;
     uid: number;
@@ -308,20 +331,22 @@ export interface RecordDoc {
     /** pretest & hack */
     input?: string;
     /** 0 if pretest&script */
-    contest?: ObjectID;
+    contest?: ObjectId;
 
     files?: Record<string, string>
+    subtasks?: Record<number, SubtaskResult>;
 }
 
 export interface JudgeMeta {
     problemOwner: number;
     hackRejudge?: string;
+    rejudge?: boolean;
 }
 
 export interface JudgeRequest extends Omit<RecordDoc, '_id' | 'testCases'> {
     priority: number;
     type: 'judge';
-    rid: ObjectID;
+    rid: ObjectId;
     config: ProblemConfigFile;
     meta: JudgeMeta;
     data: FileInfo[];
@@ -348,7 +373,7 @@ export interface TrainingNode {
 }
 
 export interface Tdoc<docType = document['TYPE_CONTEST'] | document['TYPE_TRAINING']> extends Document {
-    docId: ObjectID;
+    docId: ObjectId;
     docType: docType & number;
     beginAt: Date;
     endAt: Date;
@@ -401,7 +426,7 @@ export interface DomainDoc extends Record<string, any> {
 
 // Message
 export interface MessageDoc {
-    _id: ObjectID,
+    _id: ObjectId,
     from: number,
     to: number,
     content: string,
@@ -423,9 +448,9 @@ export type { DiscussionDoc } from './model/discussion';
 declare module './model/discussion' {
     interface DiscussionDoc {
         docType: document['TYPE_DISCUSSION'];
-        docId: ObjectID;
+        docId: ObjectId;
         parentType: number;
-        parentId: ObjectID | number | string;
+        parentId: ObjectId | number | string;
         title: string;
         content: string;
         ip: string;
@@ -440,14 +465,15 @@ declare module './model/discussion' {
         sort: number;
         lastRCount: number;
         lock?: boolean;
+        hidden?: boolean;
     }
 }
 
 export interface DiscussionReplyDoc extends Document {
     docType: document['TYPE_DISCUSSION_REPLY'];
-    docId: ObjectID;
+    docId: ObjectId;
     parentType: document['TYPE_DISCUSSION'];
-    parentId: ObjectID;
+    parentId: ObjectId;
     ip: string;
     content: string;
     reply: DiscussionTailReplyDoc[];
@@ -457,26 +483,12 @@ export interface DiscussionReplyDoc extends Document {
 }
 
 export interface DiscussionTailReplyDoc {
-    _id: ObjectID;
+    _id: ObjectId;
     owner: number;
     content: string;
     ip: string;
     edited?: boolean;
     editor?: number;
-}
-
-export interface BlogDoc {
-    docType: document['TYPE_BLOG'];
-    docId: ObjectID;
-    owner: number;
-    title: string;
-    content: string;
-    ip: string;
-    updateAt: Date;
-    nReply: number;
-    views: number;
-    reply: any[];
-    react: Record<string, number>;
 }
 
 export interface TokenDoc {
@@ -489,13 +501,18 @@ export interface TokenDoc {
 }
 
 export interface OplogDoc extends Record<string, any> {
-    _id: ObjectID,
+    _id: ObjectId,
     type: string,
 }
 
 export interface ContestStat extends Record<string, any> {
     detail: Record<number, Record<string, any>>,
     unrank?: boolean,
+}
+
+export interface ScoreboardConfig {
+    isExport: boolean;
+    lockAt?: Date;
 }
 
 export interface ContestRule<T = any> {
@@ -510,19 +527,19 @@ export interface ContestRule<T = any> {
     showRecord: (tdoc: Tdoc<30>, now: Date) => boolean;
     stat: (this: ContestRule<T>, tdoc: Tdoc<30>, journal: any[]) => ContestStat & T;
     scoreboardHeader: (
-        this: ContestRule<T>, isExport: boolean, _: (s: string) => string,
+        this: ContestRule<T>, config: ScoreboardConfig, _: (s: string) => string,
         tdoc: Tdoc<30>, pdict: ProblemDict,
     ) => Promise<ScoreboardRow>;
     scoreboardRow: (
-        this: ContestRule<T>, isExport: boolean, _: (s: string) => string,
+        this: ContestRule<T>, config: ScoreboardConfig, _: (s: string) => string,
         tdoc: Tdoc<30>, pdict: ProblemDict, udoc: BaseUser, rank: number, tsdoc: ContestStat & T,
         meta?: any,
     ) => Promise<ScoreboardRow>;
     scoreboard: (
-        this: ContestRule<T>, isExport: boolean, _: (s: string) => string,
-        tdoc: Tdoc<30>, pdict: ProblemDict, cursor: Cursor<ContestStat & T>,
+        this: ContestRule<T>, config: ScoreboardConfig, _: (s: string) => string,
+        tdoc: Tdoc<30>, pdict: ProblemDict, cursor: FindCursor<ContestStat & T>,
     ) => Promise<[board: ScoreboardRow[], udict: BaseUserDict]>;
-    ranked: (tdoc: Tdoc<30>, cursor: Cursor<ContestStat & T>) => Promise<[number, ContestStat & T][]>;
+    ranked: (tdoc: Tdoc<30>, cursor: FindCursor<ContestStat & T>) => Promise<[number, ContestStat & T][]>;
 }
 
 export type ContestRules = Dictionary<ContestRule>;
@@ -540,14 +557,21 @@ export interface JudgeMessage {
     stack?: string;
 }
 
+export interface SubtaskResult {
+    type: SubtaskType;
+    score: number;
+    status: number;
+}
+
 export interface JudgeResultBody {
     key: string;
     domainId: string;
-    rid: ObjectID;
+    rid: ObjectId;
     judger?: number;
     progress?: number;
     addProgress?: number;
-    case?: TestCase,
+    case?: TestCase;
+    cases?: TestCase[];
     status?: number;
     score?: number;
     /** in miliseconds */
@@ -557,10 +581,11 @@ export interface JudgeResultBody {
     message?: string | JudgeMessage;
     compilerText?: string;
     nop?: boolean;
+    subtasks?: Record<number, SubtaskResult>;
 }
 
 export interface Task {
-    _id: ObjectID;
+    _id: ObjectId;
     type: string;
     subType?: string;
     priority: number;
@@ -568,7 +593,7 @@ export interface Task {
 }
 
 export interface Schedule {
-    _id: ObjectID;
+    _id: ObjectId;
     type: string;
     subType?: string;
     executeAfter: Date;
@@ -600,7 +625,7 @@ export interface EventDoc {
 }
 
 export interface OpCountDoc {
-    _id: ObjectID;
+    _id: ObjectId;
     op: string;
     ident: string;
     expireAt: Date;
@@ -618,7 +643,7 @@ export interface DiscussionHistoryDoc {
     title?: string;
     content: string;
     domainId: string;
-    docId: ObjectID;
+    docId: ObjectId;
     /** Create time */
     time: Date;
     uid: number;
@@ -632,7 +657,9 @@ declare module './service/db' {
         'domain.user': any;
         'record': RecordDoc;
         'document': any;
-        'document.status': StatusDocBase;
+        'document.status': StatusDocBase & {
+            [K in keyof DocStatusType]: { docType: K } & DocStatusType[K];
+        }[keyof DocStatusType];
         'discussion.history': DiscussionHistoryDoc;
         'user': Udoc;
         'user.preference': UserPreferenceDoc;
@@ -655,7 +682,6 @@ declare module './service/db' {
 
 export interface Model {
     blacklist: typeof import('./model/blacklist').default,
-    blog: typeof import('./model/blog'),
     builtin: typeof import('./model/builtin'),
     contest: typeof import('./model/contest'),
     discussion: typeof import('./model/discussion'),
@@ -707,14 +733,10 @@ export type ProblemSearch = (domainId: string, q: string, options?: ProblemSearc
 export interface Lib extends Record<string, any> {
     difficulty: typeof import('./lib/difficulty');
     buildContent: typeof import('./lib/content').buildContent;
-    i18n: typeof import('./lib/i18n');
     mail: typeof import('./lib/mail');
-    paginate: typeof import('./lib/paginate');
     rank: typeof import('./lib/rank');
     rating: typeof import('./lib/rating');
     testdataConfig: typeof import('./lib/testdataConfig');
-    useragent: typeof import('./lib/useragent');
-    validator: typeof import('./lib/validator');
     template?: any;
     problemSearch: ProblemSearch;
 }
