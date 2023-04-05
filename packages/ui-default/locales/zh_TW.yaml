@@ -1,6 +1,6 @@
 __langname: 正體中文
-'"{data}" copied to clipboard!': “{data}”已复制到剪贴板！
-'[Richtext message]': '[富文本消息]'
+'"{data}" copied to clipboard!': “{data}”已複製到剪貼板！
+'[Richtext message]': '[富文字內容]'
 '{0} comments': '{0} 條留言'
 '{0} discussions': '{0} 條討論'
 '{0} is a moderator of this domain.': '{}是這個域的版主之一。'
@@ -26,6 +26,8 @@ __langname: 正體中文
 'Copy failed :(': '複製失敗 :('
 'Current dataset: {0}': '當前測試資料: {0}'
 'Discussion: Terms Of Service': 討論區服務條款
+'Drag and drop testcases here:': '拖曳測試用例到此處：'
+'Failed to get credential: {0}': '獲得認證資料失敗: {0}'
 'File upload failed: {0}': 文件上傳失敗：{0}
 'Format: category 1, category 2, ..., category n': 格式：分類1, 分類2, ..., 分類n
 'Hello, {0}! You can click following link to active your new email of your {1} account:': 您好，{0}！您可以點選以下連結來啟用您 {1} 賬戶的新電子郵件地址：
@@ -34,7 +36,8 @@ __langname: 正體中文
 'Join {0}': '加入 {0}'
 'No': 否
 'Note: Problem title may not be hidden.': 注意：題目標題可能不會被隱藏。
-'Packages have new version: {0}': '以下模組有新版本： {0}'
+'Packages have new version: {0}': '以下套件有新版本： {0}'
+'Please use your two factor authentication app to scan the qrcode below:': '請使用你的兩階段驗證APP掃描該QR code:'
 'Role {1} already exists in domain {0}.': '域 {0} 中已存在角色 {1}。'
 'Solved {0} problems, RP: {1} (No. {2})': '解決了 {0} 道題目，RP: {1} (No. {2})'
 'The value `{1}` of {0} already exists.': '{0} 的值 `{1}` 已經存在。'
@@ -47,6 +50,7 @@ __langname: 正體中文
 (leave blank if none): (若無則留空)
 (None): (無)
 (Not changed): 未變更
+6-Digit Code: 6位代碼
 Aborted: 已放棄
 About {0}: 關於 {0}
 About Markdown: 關於 Markdown
@@ -63,11 +67,15 @@ According to the contest rules, you cannot view your submission details at curre
 Account Settings: 賬戶設定
 Action: 動作
 Active Sessions: 活動會話
+Add Authenticator: 添加驗證器
 Add File: 新增文件
 Add module: 新增模組
 Add new data: 新增資料
+Add new subtask: 新增子任務
+Add testcase: 新增測試用例
 Add User: 新增使用者
 Add: 新增
+additional_file: 附加檔案
 All {0} Contests: 所有 {0} 比賽
 All Contests: 所有比賽
 All Homeworks: 所有功課
@@ -76,6 +84,7 @@ All Submissions: 所有提交
 All Training Plans: 所有訓練計劃
 All Users: 所有使用者
 All: 全部
+Allow to maintain this {0}: 允許管理此{0}
 Allow to maintain this contest: 允許管理此比賽
 Allow user view others code after contest: 允許使用者賽後查看其他人的程式碼
 Always granted all privileges: 總是擁有所有域許可權
@@ -84,6 +93,7 @@ An example of dataset: 測試資料集的一個範例
 Any user is allowed to join this domain with an invitation code: 任何使用者都可以通過邀請碼加入此域
 Any user is allowed to join this domain: 任何使用者都可以加入此域
 API: API
+Are you sure you want to delete this subtask?: 你確定要刪除該子任務？
 Argument {0} is invalid.: 非法的參數 {0} 。
 Arguments: 參數
 Assign User or Group: 分配給使用者或小組
@@ -94,10 +104,15 @@ Attend Contest: 參加比賽
 Attend contests: 參加比賽
 Attended: 已參加
 Attendee Manage: 參賽者管理
+Authenticator: 驗證器
+Authenticators: 驗證器
 author: 作者
+Auto configure: 自動設定
+Auto detect: 自動偵測
 Auto hide problems during the contest: 在比賽過程中自動隱藏題目
 Auto Read Tasks: 自動識別任務
 Basic Info: 基本資訊
+Basic: 基本
 Be Copied: 被複製
 Begin at: 開始於
 Begin Date: 開始日期
@@ -132,6 +147,7 @@ Check In: 簽到
 Checker: 比較器
 CheckerType: 比較器類型
 Chinese: 中文
+Choose Authenticator Type: 選擇驗證器類型
 Choose the background image in your profile page.: 選擇您資料頁面的背景圖片。
 Claim homework: 認領功課
 Claim Homework: 認領功課
@@ -145,7 +161,7 @@ Code blocks: 程式碼區塊
 Code language: 程式語言
 Code: 程式碼
 codeFontFamily: 程式字型
-collapse: 收縮
+collapse: 摺疊
 Comment: 留言
 Comments: 留言
 CommonMark Syntax: CommonMark 語法
@@ -334,6 +350,7 @@ Enroll Training: 參加訓練
 Enrolled: 已參加
 Enrollees: 參加人數
 error: 錯誤
+Errors detected in the config. Confirm save?: 設定中存在錯誤。確定要保存？
 Evaluated difficulty: 估計的難度
 Exit: 退出
 expand: 展開
@@ -343,6 +360,7 @@ Export as {0}: 導出為 {0}
 Extension (days): 最長延期 (日)
 Extension Score Penalty: 遲交扣分規則
 Extra Files Config: 額外文件設定
+Failed to fetch registration data.: 獲取註冊資料失敗。
 Failed to join the domain. You are already a member.: 加入域失敗，您已是該域的成員。
 Failed to parse subtask.: 無法分析子任務資訊。
 Failed to parse testcase.: 無法分析測試用例資訊。
@@ -397,12 +415,13 @@ home_preference: 偏好設定
 home_security: 安全設定
 homepage: 首頁
 Homework Introduction: 功課介紹
+Homework Maintainer: 功課管理員
 Homework scoreboard is not visible.: 目前無法查看功課成績表。
 homework_create: 創建功課
 homework_detail_problem_submit: 提交功課題目
 homework_edit: 編輯功課
 homework_main: 功課
-homework_scoreboard: 成績表
+homework_scoreboard: 功課成績表
 homework_status: 功課成績表
 Homework: 功課
 Host: 主持人
@@ -517,6 +536,8 @@ Month: 月
 Monthly Popular: 月度最受歡迎
 More: 更多
 Most Upvoted Solutions: 最多讚的題解
+Move to subtask: 移動到子任務
+Multi Platform Authenticator: 跨平台驗證器
 My Domains: 我的域
 My Files: 我的檔案
 My Profile: 我的資料
@@ -536,6 +557,7 @@ New file: 新檔案
 New Password: 新密碼
 New Training Plan: 新訓練計劃
 New: 創建
+No {0} at current.: 當前沒有{0}。
 No additional file at current: 當前沒有附加檔案
 No additional file at current.: 暫無附加檔案。
 No comments so far...: 目前還沒有留言...
@@ -615,9 +637,11 @@ PingFang SC: 蘋方簡體
 Plan: 計劃
 Please attend contest to see the problems.: 請參加比賽來檢視題目。
 Please claim the assignment to see the problems.: 認領功課後方可查看題目。
+Please follow the instructions on your device to complete the verification.: 請按照您設備上的指示完成認證。
 Please select at least one file to perform this operation.: 請選擇至少一個檔案來進行此操作。
 Please select at least one role to perform this operation.: 請選擇至少一個角色來進行操作。
 Please select at least one user to perform this operation.: 請選擇至少一個使用者來進行操作。
+Please wait until contest host unfreeze the scoreboard.: 請等待比賽主持人解除成績表鎖定。
 Preference Settings: 偏好設定
 Preparing Upload...: 準備上傳...
 Pretest Data: 自測資料
@@ -742,6 +766,7 @@ Score: 分數
 Scoreboard (Hidden): 成績表 (隱藏)
 Scoreboard locked at {0}: 比賽已於 {0} 封榜。
 Scoreboard: 成績表
+Scoring method: 評分方式
 Scripts: 腳本
 Search: 搜索
 Secret (visible to admins): 保密（對管理員可見）
@@ -766,6 +791,7 @@ Set Privilege: 設定權限
 Set Role: 設定角色
 Set Roles for Selected User: 設定所選使用者的角色
 Set Roles for selected users: 為所選使用者設定角色
+Set time and memory limits: 設定時空間限制
 setting_customize: 自訂
 setting_display: 顯示偏好
 setting_domain: 域設定
@@ -815,6 +841,8 @@ Submit to Judge: 提交以評測
 Submit Your Code: 提交程式進行正式評測
 Submit: 提交
 Submitted: 已提交
+Subtask {0}: 子任務 {0}
+Subtasks: 子任務
 SuperUser: 超級管理員
 Support: 支援
 Switch account: 更換賬戶
@@ -826,6 +854,7 @@ Temporary session: 臨時會話
 Terms of Service: 服務條款
 Test data comes from: 測試資料來自
 Testdata Config: 測試資料設定
+testdata: 測試資料
 Testdata: 測試資料
 Text: 文字
 The 'default' role applies to ALL REGISTERED USER.: default 角色作用於<b>所有已註冊使用者</b>
@@ -835,6 +864,7 @@ The invitation code to enter to successfully join the domain. You can only use l
 The invitation code you provided is invalid.: 您提供的邀請碼無效。
 The link will be expired at {0}: 連結將於 {0} 過期
 The role to assign when user joining the domain.: 使用者加入此域時分配的角色。
+The scoreboard was frozen with {0} minutes remaining at {1} - submissions in the last {0} minutes of the contest are still shown as pending.: 比賽已於 {1} 在剩餘 {0} 分鐘時封榜 - 比賽最後 {0} 分鐘的提交將顯示為待定。
 The uploaded file is too long.: 上傳的檔案太長。
 The user is already a member of the domain.: 該使用者已是域的成員。
 The user is too lazy to leave something here...: 該使用者太懶，這裡啥也没寫 (´・ω・｀)
@@ -873,8 +903,10 @@ training_create: 創建訓練
 training_edit: 編輯訓練
 training_main: 訓練
 Training: 訓練
+Transports: 支援類型
 Tried: 嘗試
-Two Factor Authentication: 兩步驗證
+Two Factor Authentication Code: 兩階段驗證碼
+Two Factor Authentication: 兩階段驗證
 Type: 類型
 UI Language: 使用者介面語言
 Uncompleted: 未完成
@@ -902,8 +934,11 @@ Upvote: 讚
 Usage exceeded.: 使用量超過限制。
 Use admin specificed: 由管理員指定
 Use algorithm calculated: 使用算法計算
+Use Authenticator: 使用驗證器
 Use average of above: 使用上面的平均值
+Use Password: 使用密碼
 Use Subtasks Mode: 使用子任務模式
+Use TFA Code: 使用兩階段驗證碼
 User {0} already exists.: 使用者 {0} 已存在。
 User {0} not found.: 使用者 {0} 不存在。
 User can join this domain by visiting the following URL: 使用者可以訪問此連結來加入此域
@@ -968,7 +1003,7 @@ What's script?: 什麼是腳本？
 What's this?: 這是什麼？
 Whether to show tags in the problem list.: 是否在題目列表中顯示題目的標籤。
 wiki_help: 幫助
-Will be used as the domain icon.: 將被用作圖示。
+Will be used as the domain icon.: 將被用作域圖示。
 With this feature, you can copy problems that you can view from a domain to some other domain. Their title, content, tags and categories will be copied. However, their test data are not copied directly.: 您可以通過這個功能將某域下您能查看的題目複製到其它域中，題目的標題、描述、標籤與分類將被複製過來。但是測試資料不會被直接複製。
 Without slashes or backslashes: 不含斜槓和反斜槓
 Write Your Comment: 發表您的留言
@@ -996,5 +1031,8 @@ You're not logged in.: 您沒有登入。
 You've already attended this contest.: 您已經參加本次比賽。
 You've already claimed this homework.: 您已認領該功課。
 You've already voted.: 您已經投過票。
+Your account has two factor authentication enabled. Please choose an authenticator to verify.: 您的賬戶已啟用兩階段驗證。請選擇一個驗證器來驗證。
+Your browser does not support WebAuthn or you are not in secure context.: 您的瀏覽器不支援WebAuthn或是您不在安全環境中。
+Your Device: 您的設備
 Your permission: 您的權限
 Your role: 您的角色
