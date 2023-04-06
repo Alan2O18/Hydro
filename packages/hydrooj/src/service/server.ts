@@ -383,9 +383,23 @@ export function Connection(
             if (h.prepare) await h.prepare(args);
             // eslint-disable-next-line @typescript-eslint/no-shadow
             for (const { name, target } of h.__subscribe || []) disposables.push(bus.on(name, target.bind(h)));
-            conn.onmessage = (e) => h.message?.(JSON.parse(e.data.toString()));
+            let lastHeartbeat = Date.now();
+            const interval = setInterval(() => {
+                if (Date.now() - lastHeartbeat > 80000) conn.close(4000, 'Heartbeat timeout');
+                if (Date.now() - lastHeartbeat > 30000) conn.send('ping');
+            }, 40000);
+            conn.onmessage = (e) => {
+                lastHeartbeat = Date.now();
+                if (e.data === 'pong') return;
+                if (e.data === 'ping') {
+                    conn.send('pong');
+                    return;
+                }
+                h.message?.(JSON.parse(e.data.toString()));
+            };
             conn.onclose = () => {
                 bus.emit('connection/close', h);
+                clearInterval(interval);
                 disposables.forEach((d) => d());
                 h.cleanup?.(args);
             };
@@ -544,7 +558,7 @@ ${ctx.response.status} ${endTime - startTime}ms ${ctx.response.length}`);
         socket.close();
     });
     const port = system.get('server.port');
-    pluginContext.on('app/ready', async () => {
+    pluginContext.on('app/listen', async () => {
         await new Promise((r) => {
             httpServer.listen(argv.options.port || port, () => {
                 logger.success('Server listening at: %d', argv.options.port || port);
